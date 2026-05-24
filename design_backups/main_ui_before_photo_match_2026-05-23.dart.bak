@@ -1,0 +1,1226 @@
+import 'package:flutter/material.dart';
+
+import 'models/app_user.dart';
+import 'repositories/auth_repository.dart';
+
+void main() {
+  runApp(FetalMovementApp());
+}
+
+class FetalMovementApp extends StatelessWidget {
+  FetalMovementApp({super.key, AuthRepository? authRepository})
+    : authRepository = authRepository ?? AuthRepository();
+
+  final AuthRepository authRepository;
+
+  @override
+  Widget build(BuildContext context) {
+    final colorScheme = ColorScheme.fromSeed(
+      seedColor: const Color(0xFF7AA99A),
+      brightness: Brightness.light,
+    );
+    final textTheme = ThemeData(useMaterial3: true).textTheme;
+
+    return MaterialApp(
+      title: '태동 기록',
+      debugShowCheckedModeBanner: false,
+      theme: ThemeData(
+        useMaterial3: true,
+        colorScheme: colorScheme,
+        scaffoldBackgroundColor: const Color(0xFFF8F5F1),
+        textTheme: textTheme
+            .copyWith(
+              headlineLarge: textTheme.headlineLarge?.copyWith(
+                fontWeight: FontWeight.w800,
+                color: const Color(0xFF263832),
+              ),
+              headlineMedium: textTheme.headlineMedium?.copyWith(
+                fontWeight: FontWeight.w800,
+                color: const Color(0xFF263832),
+              ),
+              titleLarge: textTheme.titleLarge?.copyWith(
+                fontWeight: FontWeight.w700,
+                color: const Color(0xFF263832),
+              ),
+              titleMedium: textTheme.titleMedium?.copyWith(
+                fontWeight: FontWeight.w700,
+                color: const Color(0xFF263832),
+              ),
+              bodyLarge: textTheme.bodyLarge?.copyWith(
+                height: 1.45,
+                color: const Color(0xFF3E4F49),
+              ),
+              bodyMedium: textTheme.bodyMedium?.copyWith(
+                height: 1.45,
+                color: const Color(0xFF52625C),
+              ),
+              bodySmall: textTheme.bodySmall?.copyWith(
+                height: 1.35,
+                color: const Color(0xFF697872),
+              ),
+            )
+            .apply(fontFamily: 'Roboto'),
+        appBarTheme: const AppBarTheme(
+          centerTitle: false,
+          elevation: 0,
+          scrolledUnderElevation: 0,
+          backgroundColor: Color(0xFFF8F5F1),
+          foregroundColor: Color(0xFF263832),
+        ),
+        cardTheme: CardThemeData(
+          color: Colors.white,
+          elevation: 0,
+          margin: EdgeInsets.zero,
+          shape: RoundedRectangleBorder(
+            borderRadius: BorderRadius.circular(8),
+            side: const BorderSide(color: Color(0xFFE5DDD3)),
+          ),
+        ),
+        inputDecorationTheme: InputDecorationTheme(
+          filled: true,
+          fillColor: Colors.white,
+          contentPadding: const EdgeInsets.symmetric(
+            horizontal: 16,
+            vertical: 16,
+          ),
+          border: OutlineInputBorder(
+            borderRadius: BorderRadius.circular(8),
+            borderSide: const BorderSide(color: Color(0xFFE1D8CC)),
+          ),
+          enabledBorder: OutlineInputBorder(
+            borderRadius: BorderRadius.circular(8),
+            borderSide: const BorderSide(color: Color(0xFFE1D8CC)),
+          ),
+          focusedBorder: OutlineInputBorder(
+            borderRadius: BorderRadius.circular(8),
+            borderSide: BorderSide(color: colorScheme.primary, width: 1.4),
+          ),
+          errorBorder: OutlineInputBorder(
+            borderRadius: BorderRadius.circular(8),
+            borderSide: BorderSide(color: colorScheme.error),
+          ),
+        ),
+        elevatedButtonTheme: ElevatedButtonThemeData(
+          style: ElevatedButton.styleFrom(
+            minimumSize: const Size.fromHeight(52),
+            elevation: 0,
+            textStyle: const TextStyle(fontWeight: FontWeight.w700),
+            shape: RoundedRectangleBorder(
+              borderRadius: BorderRadius.circular(8),
+            ),
+          ),
+        ),
+        outlinedButtonTheme: OutlinedButtonThemeData(
+          style: OutlinedButton.styleFrom(
+            minimumSize: const Size.fromHeight(48),
+            shape: RoundedRectangleBorder(
+              borderRadius: BorderRadius.circular(8),
+            ),
+          ),
+        ),
+        textButtonTheme: TextButtonThemeData(
+          style: TextButton.styleFrom(
+            minimumSize: const Size(48, 48),
+            textStyle: const TextStyle(fontWeight: FontWeight.w700),
+          ),
+        ),
+        navigationBarTheme: NavigationBarThemeData(
+          backgroundColor: Colors.white,
+          elevation: 0,
+          indicatorColor: colorScheme.primaryContainer,
+          labelTextStyle: WidgetStateProperty.resolveWith((states) {
+            final isSelected = states.contains(WidgetState.selected);
+            return TextStyle(
+              fontSize: 12,
+              fontWeight: isSelected ? FontWeight.w700 : FontWeight.w500,
+            );
+          }),
+        ),
+      ),
+      home: AuthGate(authRepository: authRepository),
+    );
+  }
+}
+
+class AuthGate extends StatefulWidget {
+  const AuthGate({super.key, required this.authRepository});
+
+  final AuthRepository authRepository;
+
+  @override
+  State<AuthGate> createState() => _AuthGateState();
+}
+
+class _AuthGateState extends State<AuthGate> {
+  AppUser? _currentUser;
+  bool _isCheckingSession = true;
+
+  @override
+  void initState() {
+    super.initState();
+    _checkSession();
+  }
+
+  Future<void> _checkSession() async {
+    final user = await widget.authRepository.getCurrentUser();
+    if (!mounted) {
+      return;
+    }
+    setState(() {
+      _currentUser = user;
+      _isCheckingSession = false;
+    });
+  }
+
+  void _handleAuthenticated(AppUser user) {
+    setState(() {
+      _currentUser = user;
+    });
+  }
+
+  Future<void> _handleLogout() async {
+    await widget.authRepository.logout();
+    if (!mounted) {
+      return;
+    }
+    setState(() {
+      _currentUser = null;
+    });
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    if (_isCheckingSession) {
+      return const SplashScreen();
+    }
+
+    final user = _currentUser;
+    if (user == null) {
+      return AuthScreen(
+        authRepository: widget.authRepository,
+        onAuthenticated: _handleAuthenticated,
+      );
+    }
+
+    return HomeScreen(user: user, onLogout: _handleLogout);
+  }
+}
+
+class SplashScreen extends StatelessWidget {
+  const SplashScreen({super.key});
+
+  @override
+  Widget build(BuildContext context) {
+    final colors = Theme.of(context).colorScheme;
+
+    return Scaffold(
+      body: Center(
+        child: Container(
+          width: 240,
+          padding: const EdgeInsets.all(24),
+          decoration: BoxDecoration(
+            color: Colors.white,
+            borderRadius: BorderRadius.circular(8),
+            border: Border.all(color: colors.outlineVariant),
+          ),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: <Widget>[
+              CircularProgressIndicator(color: colors.primary),
+              const SizedBox(height: 18),
+              Text(
+                '기록을 불러오는 중입니다',
+                textAlign: TextAlign.center,
+                style: Theme.of(context).textTheme.titleMedium,
+              ),
+              const SizedBox(height: 6),
+              Text(
+                '로그인 상태를 확인하고 있어요.',
+                textAlign: TextAlign.center,
+                style: Theme.of(context).textTheme.bodySmall,
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+class AuthScreen extends StatefulWidget {
+  const AuthScreen({
+    super.key,
+    required this.authRepository,
+    required this.onAuthenticated,
+  });
+
+  final AuthRepository authRepository;
+  final ValueChanged<AppUser> onAuthenticated;
+
+  @override
+  State<AuthScreen> createState() => _AuthScreenState();
+}
+
+class _AuthScreenState extends State<AuthScreen> {
+  final _formKey = GlobalKey<FormState>();
+  final _displayNameController = TextEditingController();
+  final _emailController = TextEditingController();
+  final _passwordController = TextEditingController();
+  final _passwordConfirmController = TextEditingController();
+
+  bool _isSignUp = false;
+  bool _isSubmitting = false;
+  bool _obscurePassword = true;
+  String? _errorMessage;
+
+  @override
+  void dispose() {
+    _displayNameController.dispose();
+    _emailController.dispose();
+    _passwordController.dispose();
+    _passwordConfirmController.dispose();
+    super.dispose();
+  }
+
+  Future<void> _submit() async {
+    FocusScope.of(context).unfocus();
+    setState(() {
+      _errorMessage = null;
+    });
+
+    if (!_formKey.currentState!.validate()) {
+      return;
+    }
+
+    setState(() {
+      _isSubmitting = true;
+    });
+
+    try {
+      final user = _isSignUp
+          ? await widget.authRepository.signUp(
+              _emailController.text,
+              _passwordController.text,
+              _displayNameController.text,
+            )
+          : await widget.authRepository.login(
+              _emailController.text,
+              _passwordController.text,
+            );
+
+      if (!mounted) {
+        return;
+      }
+      widget.onAuthenticated(user);
+    } on AuthException catch (error) {
+      setState(() {
+        _errorMessage = error.message;
+      });
+    } catch (_) {
+      setState(() {
+        _errorMessage = '계정 정보를 처리하지 못했습니다. 잠시 후 다시 시도해 주세요.';
+      });
+    } finally {
+      if (mounted) {
+        setState(() {
+          _isSubmitting = false;
+        });
+      }
+    }
+  }
+
+  void _toggleMode() {
+    setState(() {
+      _isSignUp = !_isSignUp;
+      _errorMessage = null;
+      _formKey.currentState?.reset();
+    });
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final title = _isSignUp ? '회원가입' : '로그인';
+    final subtitle = _isSignUp
+        ? '태동 기록을 안전하게 보관할 계정을 만들어 주세요.'
+        : '오늘의 기록을 이어서 확인해 보세요.';
+
+    return Scaffold(
+      body: SafeArea(
+        child: Center(
+          child: SingleChildScrollView(
+            padding: const EdgeInsets.all(20),
+            child: ConstrainedBox(
+              constraints: const BoxConstraints(maxWidth: 440),
+              child: Card(
+                child: Padding(
+                  padding: const EdgeInsets.fromLTRB(22, 24, 22, 18),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.stretch,
+                    children: <Widget>[
+                      const _BrandHeader(),
+                      const SizedBox(height: 22),
+                      Text(
+                        title,
+                        textAlign: TextAlign.center,
+                        style: Theme.of(context).textTheme.headlineMedium,
+                      ),
+                      const SizedBox(height: 8),
+                      Text(
+                        subtitle,
+                        textAlign: TextAlign.center,
+                        style: Theme.of(context).textTheme.bodyMedium,
+                      ),
+                      const SizedBox(height: 24),
+                      Form(
+                        key: _formKey,
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.stretch,
+                          children: <Widget>[
+                            if (_isSignUp) ...<Widget>[
+                              TextFormField(
+                                key: const Key('displayNameField'),
+                                controller: _displayNameController,
+                                textInputAction: TextInputAction.next,
+                                decoration: const InputDecoration(
+                                  labelText: '이름 또는 별칭',
+                                  prefixIcon: Icon(Icons.person_outline),
+                                ),
+                                validator: _validateDisplayName,
+                              ),
+                              const SizedBox(height: 14),
+                            ],
+                            TextFormField(
+                              key: const Key('emailField'),
+                              controller: _emailController,
+                              keyboardType: TextInputType.emailAddress,
+                              textInputAction: TextInputAction.next,
+                              autofillHints: const <String>[
+                                AutofillHints.email,
+                              ],
+                              decoration: const InputDecoration(
+                                labelText: '이메일',
+                                prefixIcon: Icon(Icons.mail_outline),
+                              ),
+                              validator: _validateEmail,
+                            ),
+                            const SizedBox(height: 14),
+                            TextFormField(
+                              key: const Key('passwordField'),
+                              controller: _passwordController,
+                              obscureText: _obscurePassword,
+                              textInputAction: _isSignUp
+                                  ? TextInputAction.next
+                                  : TextInputAction.done,
+                              autofillHints: const <String>[
+                                AutofillHints.password,
+                              ],
+                              decoration: InputDecoration(
+                                labelText: '비밀번호',
+                                prefixIcon: const Icon(Icons.lock_outline),
+                                suffixIcon: IconButton(
+                                  tooltip: _obscurePassword
+                                      ? '비밀번호 보기'
+                                      : '비밀번호 숨기기',
+                                  onPressed: () {
+                                    setState(() {
+                                      _obscurePassword = !_obscurePassword;
+                                    });
+                                  },
+                                  icon: Icon(
+                                    _obscurePassword
+                                        ? Icons.visibility_outlined
+                                        : Icons.visibility_off_outlined,
+                                  ),
+                                ),
+                              ),
+                              validator: _validatePassword,
+                              onFieldSubmitted: (_) {
+                                if (!_isSignUp && !_isSubmitting) {
+                                  _submit();
+                                }
+                              },
+                            ),
+                            if (_isSignUp) ...<Widget>[
+                              const SizedBox(height: 14),
+                              TextFormField(
+                                key: const Key('passwordConfirmField'),
+                                controller: _passwordConfirmController,
+                                obscureText: _obscurePassword,
+                                textInputAction: TextInputAction.done,
+                                decoration: const InputDecoration(
+                                  labelText: '비밀번호 확인',
+                                  prefixIcon: Icon(Icons.lock_outline),
+                                ),
+                                validator: _validatePasswordConfirm,
+                                onFieldSubmitted: (_) {
+                                  if (!_isSubmitting) {
+                                    _submit();
+                                  }
+                                },
+                              ),
+                            ],
+                            if (_errorMessage != null) ...<Widget>[
+                              const SizedBox(height: 14),
+                              ErrorNotice(message: _errorMessage!),
+                            ],
+                            const SizedBox(height: 22),
+                            ElevatedButton(
+                              key: const Key('submitAuthButton'),
+                              onPressed: _isSubmitting ? null : _submit,
+                              child: _isSubmitting
+                                  ? const _ButtonLoader()
+                                  : Text(title),
+                            ),
+                            const SizedBox(height: 8),
+                            TextButton(
+                              key: const Key('toggleAuthModeButton'),
+                              onPressed: _isSubmitting ? null : _toggleMode,
+                              child: Text(
+                                _isSignUp
+                                    ? '이미 계정이 있나요? 로그인'
+                                    : '처음 사용하시나요? 회원가입',
+                              ),
+                            ),
+                          ],
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+              ),
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+
+  String? _validatePasswordConfirm(String? value) {
+    if (value != _passwordController.text) {
+      return '비밀번호가 서로 다릅니다.';
+    }
+    return null;
+  }
+}
+
+class _BrandHeader extends StatelessWidget {
+  const _BrandHeader();
+
+  @override
+  Widget build(BuildContext context) {
+    final colors = Theme.of(context).colorScheme;
+
+    return Column(
+      children: <Widget>[
+        Container(
+          width: 62,
+          height: 62,
+          decoration: BoxDecoration(
+            color: colors.primaryContainer,
+            shape: BoxShape.circle,
+          ),
+          child: Icon(
+            Icons.favorite_border,
+            color: colors.onPrimaryContainer,
+            size: 32,
+          ),
+        ),
+        const SizedBox(height: 12),
+        Text('태동 기록', style: Theme.of(context).textTheme.titleLarge),
+        const SizedBox(height: 4),
+        Text(
+          '하루의 움직임을 차분히 살펴보는 앱',
+          style: Theme.of(context).textTheme.bodySmall,
+        ),
+      ],
+    );
+  }
+}
+
+class _ButtonLoader extends StatelessWidget {
+  const _ButtonLoader();
+
+  @override
+  Widget build(BuildContext context) {
+    return SizedBox.square(
+      dimension: 20,
+      child: CircularProgressIndicator(
+        strokeWidth: 2,
+        color: Theme.of(context).colorScheme.onPrimary,
+      ),
+    );
+  }
+}
+
+class ErrorNotice extends StatelessWidget {
+  const ErrorNotice({super.key, required this.message});
+
+  final String message;
+
+  @override
+  Widget build(BuildContext context) {
+    final colors = Theme.of(context).colorScheme;
+
+    return Container(
+      padding: const EdgeInsets.all(14),
+      decoration: BoxDecoration(
+        color: colors.errorContainer,
+        borderRadius: BorderRadius.circular(8),
+      ),
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: <Widget>[
+          Icon(Icons.info_outline, color: colors.onErrorContainer),
+          const SizedBox(width: 10),
+          Expanded(
+            child: Text(
+              message,
+              style: TextStyle(
+                color: colors.onErrorContainer,
+                fontWeight: FontWeight.w600,
+              ),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class HomeScreen extends StatefulWidget {
+  const HomeScreen({super.key, required this.user, required this.onLogout});
+
+  final AppUser user;
+  final Future<void> Function() onLogout;
+
+  @override
+  State<HomeScreen> createState() => _HomeScreenState();
+}
+
+class _HomeScreenState extends State<HomeScreen> {
+  int _selectedIndex = 0;
+
+  @override
+  Widget build(BuildContext context) {
+    final titles = <String>['홈', '모니터링', '리포트', '알림', 'My'];
+
+    return Scaffold(
+      appBar: AppBar(
+        title: Text(titles[_selectedIndex]),
+        actions: <Widget>[
+          IconButton(
+            tooltip: '로그아웃',
+            onPressed: widget.onLogout,
+            icon: const Icon(Icons.logout_outlined),
+          ),
+          const SizedBox(width: 8),
+        ],
+      ),
+      body: IndexedStack(
+        index: _selectedIndex,
+        children: <Widget>[
+          _DashboardTab(user: widget.user),
+          const _MonitoringTab(),
+          const _ReportTab(),
+          const _AlertTab(),
+          _MyTab(user: widget.user),
+        ],
+      ),
+      bottomNavigationBar: NavigationBar(
+        selectedIndex: _selectedIndex,
+        onDestinationSelected: (index) {
+          setState(() {
+            _selectedIndex = index;
+          });
+        },
+        destinations: const <NavigationDestination>[
+          NavigationDestination(
+            icon: Icon(Icons.home_outlined),
+            selectedIcon: Icon(Icons.home),
+            label: '홈',
+          ),
+          NavigationDestination(
+            icon: Icon(Icons.monitor_heart_outlined),
+            selectedIcon: Icon(Icons.monitor_heart),
+            label: '모니터링',
+          ),
+          NavigationDestination(
+            icon: Icon(Icons.bar_chart_outlined),
+            selectedIcon: Icon(Icons.bar_chart),
+            label: '리포트',
+          ),
+          NavigationDestination(
+            icon: Icon(Icons.notifications_none),
+            selectedIcon: Icon(Icons.notifications),
+            label: '알림',
+          ),
+          NavigationDestination(
+            icon: Icon(Icons.person_outline),
+            selectedIcon: Icon(Icons.person),
+            label: 'My',
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class _DashboardTab extends StatelessWidget {
+  const _DashboardTab({required this.user});
+
+  final AppUser user;
+
+  @override
+  Widget build(BuildContext context) {
+    return ListView(
+      padding: const EdgeInsets.fromLTRB(20, 8, 20, 24),
+      children: <Widget>[
+        _GreetingPanel(user: user),
+        const SizedBox(height: 16),
+        const _SectionTitle(title: '오늘의 요약', actionLabel: '기록 보기'),
+        const SizedBox(height: 10),
+        const Row(
+          children: <Widget>[
+            Expanded(
+              child: _MetricCard(
+                icon: Icons.timeline_outlined,
+                label: '감지 횟수',
+                value: '준비 중',
+                tone: _CardTone.green,
+              ),
+            ),
+            SizedBox(width: 12),
+            Expanded(
+              child: _MetricCard(
+                icon: Icons.access_time,
+                label: '최근 감지',
+                value: '대기 중',
+                tone: _CardTone.pink,
+              ),
+            ),
+          ],
+        ),
+        const SizedBox(height: 12),
+        const _MovementCard(),
+        const SizedBox(height: 16),
+        const _SectionTitle(title: '연결 상태'),
+        const SizedBox(height: 10),
+        const _StatusCard(
+          icon: Icons.sensors_outlined,
+          title: '복부 센서',
+          status: '연결 준비',
+          description: '자이로센서와 진동센서 데이터가 연결되면 이곳에 표시됩니다.',
+        ),
+        const SizedBox(height: 10),
+        const _StatusCard(
+          icon: Icons.watch_outlined,
+          title: 'Galaxy Watch 알림',
+          status: '향후 확장',
+          description: '태동 감지 알림을 손목 진동으로 안내하는 기능을 고려합니다.',
+        ),
+        const SizedBox(height: 16),
+        const _NoticeCard(),
+      ],
+    );
+  }
+}
+
+class _GreetingPanel extends StatelessWidget {
+  const _GreetingPanel({required this.user});
+
+  final AppUser user;
+
+  @override
+  Widget build(BuildContext context) {
+    final colors = Theme.of(context).colorScheme;
+
+    return Container(
+      padding: const EdgeInsets.all(20),
+      decoration: BoxDecoration(
+        color: colors.primaryContainer,
+        borderRadius: BorderRadius.circular(8),
+      ),
+      child: Row(
+        children: <Widget>[
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: <Widget>[
+                Text(
+                  '${user.displayName}님, 안녕하세요.',
+                  style: Theme.of(context).textTheme.headlineSmall?.copyWith(
+                    color: colors.onPrimaryContainer,
+                    fontWeight: FontWeight.w800,
+                  ),
+                ),
+                const SizedBox(height: 8),
+                Text(
+                  '오늘의 태동 관련 데이터를 차분히 확인해 보세요.',
+                  style: Theme.of(context).textTheme.bodyMedium?.copyWith(
+                    color: colors.onPrimaryContainer.withValues(alpha: 0.82),
+                  ),
+                ),
+              ],
+            ),
+          ),
+          const SizedBox(width: 12),
+          Icon(
+            Icons.favorite,
+            color: colors.onPrimaryContainer.withValues(alpha: 0.78),
+            size: 42,
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class _SectionTitle extends StatelessWidget {
+  const _SectionTitle({required this.title, this.actionLabel});
+
+  final String title;
+  final String? actionLabel;
+
+  @override
+  Widget build(BuildContext context) {
+    return Row(
+      children: <Widget>[
+        Expanded(
+          child: Text(title, style: Theme.of(context).textTheme.titleMedium),
+        ),
+        if (actionLabel != null)
+          TextButton(onPressed: () {}, child: Text(actionLabel!)),
+      ],
+    );
+  }
+}
+
+enum _CardTone { green, pink }
+
+class _MetricCard extends StatelessWidget {
+  const _MetricCard({
+    required this.icon,
+    required this.label,
+    required this.value,
+    required this.tone,
+  });
+
+  final IconData icon;
+  final String label;
+  final String value;
+  final _CardTone tone;
+
+  @override
+  Widget build(BuildContext context) {
+    final color = tone == _CardTone.green
+        ? const Color(0xFFEAF4EF)
+        : const Color(0xFFFFEDF0);
+    final iconColor = tone == _CardTone.green
+        ? const Color(0xFF3F7E6E)
+        : const Color(0xFFB65F71);
+
+    return Card(
+      child: Padding(
+        padding: const EdgeInsets.all(16),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: <Widget>[
+            Container(
+              width: 40,
+              height: 40,
+              decoration: BoxDecoration(color: color, shape: BoxShape.circle),
+              child: Icon(icon, color: iconColor),
+            ),
+            const SizedBox(height: 14),
+            Text(label, style: Theme.of(context).textTheme.bodySmall),
+            const SizedBox(height: 4),
+            Text(value, style: Theme.of(context).textTheme.titleLarge),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+class _MovementCard extends StatelessWidget {
+  const _MovementCard();
+
+  @override
+  Widget build(BuildContext context) {
+    return Card(
+      child: Padding(
+        padding: const EdgeInsets.all(18),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: <Widget>[
+            Row(
+              children: <Widget>[
+                Expanded(
+                  child: Text(
+                    '시간대별 움직임',
+                    style: Theme.of(context).textTheme.titleMedium,
+                  ),
+                ),
+                Text('센서 대기', style: Theme.of(context).textTheme.bodySmall),
+              ],
+            ),
+            const SizedBox(height: 18),
+            const _SoftBarChart(),
+            const SizedBox(height: 16),
+            const _EmptyState(
+              icon: Icons.data_usage_outlined,
+              title: '아직 기록된 태동 데이터가 없습니다',
+              description: '기기가 연결되면 시간대별 감지 흐름이 이 카드에 표시됩니다.',
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+class _SoftBarChart extends StatelessWidget {
+  const _SoftBarChart();
+
+  @override
+  Widget build(BuildContext context) {
+    final bars = <double>[0.24, 0.42, 0.34, 0.58, 0.48, 0.72, 0.38];
+
+    return SizedBox(
+      height: 88,
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.end,
+        children: bars.map((heightFactor) {
+          return Expanded(
+            child: Padding(
+              padding: const EdgeInsets.symmetric(horizontal: 4),
+              child: FractionallySizedBox(
+                heightFactor: heightFactor,
+                alignment: Alignment.bottomCenter,
+                child: DecoratedBox(
+                  decoration: BoxDecoration(
+                    color: const Color(0xFFA7CABE),
+                    borderRadius: BorderRadius.circular(8),
+                  ),
+                ),
+              ),
+            ),
+          );
+        }).toList(),
+      ),
+    );
+  }
+}
+
+class _StatusCard extends StatelessWidget {
+  const _StatusCard({
+    required this.icon,
+    required this.title,
+    required this.status,
+    required this.description,
+  });
+
+  final IconData icon;
+  final String title;
+  final String status;
+  final String description;
+
+  @override
+  Widget build(BuildContext context) {
+    final colors = Theme.of(context).colorScheme;
+
+    return Card(
+      child: Padding(
+        padding: const EdgeInsets.all(16),
+        child: Row(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: <Widget>[
+            Container(
+              width: 42,
+              height: 42,
+              decoration: BoxDecoration(
+                color: const Color(0xFFF2EEE7),
+                borderRadius: BorderRadius.circular(8),
+              ),
+              child: Icon(icon, color: colors.primary),
+            ),
+            const SizedBox(width: 14),
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: <Widget>[
+                  Row(
+                    children: <Widget>[
+                      Expanded(
+                        child: Text(
+                          title,
+                          style: Theme.of(context).textTheme.titleMedium,
+                        ),
+                      ),
+                      _StatusChip(label: status),
+                    ],
+                  ),
+                  const SizedBox(height: 8),
+                  Text(description),
+                ],
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+class _StatusChip extends StatelessWidget {
+  const _StatusChip({required this.label});
+
+  final String label;
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+      decoration: BoxDecoration(
+        color: const Color(0xFFEAF4EF),
+        borderRadius: BorderRadius.circular(999),
+      ),
+      child: Text(
+        label,
+        style: Theme.of(context).textTheme.labelSmall?.copyWith(
+          color: const Color(0xFF3F7E6E),
+          fontWeight: FontWeight.w700,
+        ),
+      ),
+    );
+  }
+}
+
+class _NoticeCard extends StatelessWidget {
+  const _NoticeCard();
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      padding: const EdgeInsets.all(16),
+      decoration: BoxDecoration(
+        color: const Color(0xFFFFF7E8),
+        borderRadius: BorderRadius.circular(8),
+        border: Border.all(color: const Color(0xFFF0DEB8)),
+      ),
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: <Widget>[
+          const Icon(Icons.info_outline, color: Color(0xFF8C6B2F)),
+          const SizedBox(width: 12),
+          Expanded(
+            child: Text(
+              '이 화면은 태동 관련 기록을 살펴보기 위한 참고 자료입니다. 불편감이나 걱정이 지속되면 의료진과 상담해 주세요.',
+              style: Theme.of(
+                context,
+              ).textTheme.bodySmall?.copyWith(color: const Color(0xFF6C5626)),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class _MonitoringTab extends StatelessWidget {
+  const _MonitoringTab();
+
+  @override
+  Widget build(BuildContext context) {
+    return const _TabScaffold(
+      icon: Icons.monitor_heart_outlined,
+      title: '실시간 모니터링 준비 중',
+      description: '복부 기기에서 센서 값이 들어오면 감지 흐름과 최근 움직임을 보여줄 예정입니다.',
+      cards: <Widget>[
+        _StatusCard(
+          icon: Icons.vibration,
+          title: '진동센서',
+          status: '대기',
+          description: '진동 변화가 감지되면 참고 지표로 정리합니다.',
+        ),
+        _StatusCard(
+          icon: Icons.screen_rotation_alt_outlined,
+          title: '자이로센서',
+          status: '대기',
+          description: '착용 상태와 움직임 변화를 함께 살펴볼 수 있게 준비합니다.',
+        ),
+      ],
+    );
+  }
+}
+
+class _ReportTab extends StatelessWidget {
+  const _ReportTab();
+
+  @override
+  Widget build(BuildContext context) {
+    return const _TabScaffold(
+      icon: Icons.bar_chart_outlined,
+      title: '리포트 데이터가 아직 없습니다',
+      description: '기록이 쌓이면 일별 흐름과 시간대별 패턴을 차분한 카드로 보여줍니다.',
+      cards: <Widget>[
+        _StatusCard(
+          icon: Icons.calendar_month_outlined,
+          title: '주간 요약',
+          status: '준비 중',
+          description: '감지 횟수와 기록 시간을 주 단위로 비교합니다.',
+        ),
+      ],
+    );
+  }
+}
+
+class _AlertTab extends StatelessWidget {
+  const _AlertTab();
+
+  @override
+  Widget build(BuildContext context) {
+    return const _TabScaffold(
+      icon: Icons.notifications_none,
+      title: '알림 설정 준비 중',
+      description: '앱 알림과 향후 Galaxy Watch 진동 알림을 한곳에서 관리할 수 있게 준비합니다.',
+      cards: <Widget>[
+        _StatusCard(
+          icon: Icons.watch_outlined,
+          title: '워치 진동 알림',
+          status: '향후 확장',
+          description: 'Android/Kotlin 확장 단계에서 연동을 고려합니다.',
+        ),
+      ],
+    );
+  }
+}
+
+class _MyTab extends StatelessWidget {
+  const _MyTab({required this.user});
+
+  final AppUser user;
+
+  @override
+  Widget build(BuildContext context) {
+    return ListView(
+      padding: const EdgeInsets.fromLTRB(20, 8, 20, 24),
+      children: <Widget>[
+        _SectionTitle(title: '${user.displayName}님의 공간'),
+        const SizedBox(height: 10),
+        _StatusCard(
+          icon: Icons.mail_outline,
+          title: user.email,
+          status: '로그인됨',
+          description: '이 계정으로 기기 내부 SQLite에 저장된 기록을 확인합니다.',
+        ),
+        const SizedBox(height: 10),
+        const _NoticeCard(),
+      ],
+    );
+  }
+}
+
+class _TabScaffold extends StatelessWidget {
+  const _TabScaffold({
+    required this.icon,
+    required this.title,
+    required this.description,
+    this.cards = const <Widget>[],
+  });
+
+  final IconData icon;
+  final String title;
+  final String description;
+  final List<Widget> cards;
+
+  @override
+  Widget build(BuildContext context) {
+    return ListView(
+      padding: const EdgeInsets.fromLTRB(20, 8, 20, 24),
+      children: <Widget>[
+        _EmptyState(icon: icon, title: title, description: description),
+        const SizedBox(height: 16),
+        ...cards.expand((card) => <Widget>[card, const SizedBox(height: 10)]),
+      ],
+    );
+  }
+}
+
+class _EmptyState extends StatelessWidget {
+  const _EmptyState({
+    required this.icon,
+    required this.title,
+    required this.description,
+  });
+
+  final IconData icon;
+  final String title;
+  final String description;
+
+  @override
+  Widget build(BuildContext context) {
+    final colors = Theme.of(context).colorScheme;
+
+    return Container(
+      width: double.infinity,
+      padding: const EdgeInsets.all(18),
+      decoration: BoxDecoration(
+        color: Colors.white,
+        borderRadius: BorderRadius.circular(8),
+        border: Border.all(color: colors.outlineVariant),
+      ),
+      child: Column(
+        children: <Widget>[
+          Icon(icon, color: colors.primary, size: 36),
+          const SizedBox(height: 12),
+          Text(
+            title,
+            textAlign: TextAlign.center,
+            style: Theme.of(context).textTheme.titleMedium,
+          ),
+          const SizedBox(height: 6),
+          Text(
+            description,
+            textAlign: TextAlign.center,
+            style: Theme.of(context).textTheme.bodySmall,
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+String? _validateDisplayName(String? value) {
+  final text = value?.trim() ?? '';
+  if (text.isEmpty) {
+    return '이름 또는 별칭을 입력해 주세요.';
+  }
+  if (text.length < 2) {
+    return '2자 이상 입력해 주세요.';
+  }
+  return null;
+}
+
+String? _validateEmail(String? value) {
+  final text = value?.trim() ?? '';
+  if (text.isEmpty) {
+    return '이메일을 입력해 주세요.';
+  }
+  final emailPattern = RegExp(r'^[^@\s]+@[^@\s]+\.[^@\s]+$');
+  if (!emailPattern.hasMatch(text)) {
+    return '올바른 이메일 형식으로 입력해 주세요.';
+  }
+  return null;
+}
+
+String? _validatePassword(String? value) {
+  final text = value ?? '';
+  if (text.isEmpty) {
+    return '비밀번호를 입력해 주세요.';
+  }
+  if (text.length < 6) {
+    return '비밀번호는 6자 이상이어야 합니다.';
+  }
+  return null;
+}
