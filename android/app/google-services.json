@@ -1,0 +1,29 @@
+{
+  "project_info": {
+    "project_number": "388700129782",
+    "project_id": "dingdong-app-bcc42",
+    "storage_bucket": "dingdong-app-bcc42.firebasestorage.app"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:388700129782:android:e9423c0e1c4e00ae499fd7",
+        "android_client_info": {
+          "package_name": "com.example.test1"
+        }
+      },
+      "oauth_client": [],
+      "api_key": [
+        {
+          "current_key": "AIzaSyCu4vNGcriF-_bXQnhn2YXWEt9szeccJtg"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": []
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}
