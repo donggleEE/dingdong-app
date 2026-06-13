@@ -1,0 +1,41 @@
+# Codex 기본 설정 파일
+
+model = "gpt-5.5"
+model_reasoning_effort = "medium"
+sandbox_mode = "workspace-write"
+approval_policy = "on-request"
+
+[sandbox_workspace_write]
+network_access = false
+
+[project]
+name = "태동 감지 데이터 시각화 앱"
+language = "ko"
+description = "복부 착용형 센서 기기에서 받은 태동 데이터를 Flutter 앱에서 시각화하고 SQLite로 로컬 저장하는 프로젝트"
+
+instructions = """
+응답 언어는 한국어로 작성한다.
+작업 기록은 CODEX_LOG.md에 정리한다.
+프로젝트 목표는 복부 착용형 센서 기기에서 받은 태동 데이터를 Flutter 앱에서 시각화하고 SQLite로 로컬 저장하는 것이다.
+"""
+
+[agents.project_manager]
+model = "gpt-5.5"
+model_reasoning_effort = "xhigh"
+instructions_file = ".codex/agents/project_manager.md"
+
+[agents.frontend]
+model = "gpt-5.5"
+model_reasoning_effort = "medium"
+instructions_file = ".codex/agents/frontend.md"
+
+[agents.backend]
+model = "gpt-5.5"
+model_reasoning_effort = "medium"
+instructions_file = ".codex/agents/backend.md"
+
+[agents.tester]
+model = "gpt-5.5"
+model_reasoning_effort = "medium"
+instructions_file = ".codex/agents/tester.md"
+
