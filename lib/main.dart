@@ -109,15 +109,16 @@ Future<void> main() async {
 }
 
 class AppColors {
-  static const coral = Color(0xFFFF9D78);
-  static const coralDark = Color(0xFFE77557);
-  static const peach = Color(0xFFFFE5DA);
-  static const mint = Color(0xFF58C18A);
+  static const coral = Color(0xFFFF9172);
+  static const coralDark = Color(0xFFD96E54);
+  static const peach = Color(0xFFFFE2D6);
+  static const mint = Color(0xFF45D77F);
   static const ink = Color(0xFF292727);
-  static const muted = Color(0xFF756C68);
-  static const surface = Color(0xFFFFFBF8);
-  static const line = Color(0xFFECE0DC);
-  static const softGray = Color(0xFFE7E5E4);
+  static const muted = Color(0xFF7E7774);
+  static const surface = Color(0xFFFFFFFF);
+  static const line = Color(0xFFEAE0DD);
+  static const softGray = Color(0xFFE9E8E7);
+  static const controlGray = Color(0xFFF0EFEE);
 }
 
 ThemeData _buildTheme() {
@@ -148,15 +149,49 @@ ThemeData _buildTheme() {
     cardTheme: CardThemeData(
       color: AppColors.surface,
       elevation: 0,
+      margin: EdgeInsets.zero,
       shape: RoundedRectangleBorder(
-        borderRadius: BorderRadius.circular(20),
+        borderRadius: BorderRadius.circular(24),
         side: const BorderSide(color: AppColors.line),
+      ),
+    ),
+    elevatedButtonTheme: ElevatedButtonThemeData(
+      style: ElevatedButton.styleFrom(
+        backgroundColor: AppColors.ink,
+        foregroundColor: Colors.white,
+        elevation: 3,
+        shadowColor: Colors.black.withValues(alpha: .18),
+        minimumSize: const Size.fromHeight(54),
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(22)),
+        textStyle: const TextStyle(fontWeight: FontWeight.w800, fontSize: 16),
+      ),
+    ),
+    segmentedButtonTheme: SegmentedButtonThemeData(
+      style: ButtonStyle(
+        backgroundColor: WidgetStateProperty.resolveWith(
+          (states) => states.contains(WidgetState.selected)
+              ? AppColors.ink
+              : Colors.white,
+        ),
+        foregroundColor: WidgetStateProperty.resolveWith(
+          (states) => states.contains(WidgetState.selected)
+              ? Colors.white
+              : AppColors.ink,
+        ),
+        side: const WidgetStatePropertyAll(BorderSide(color: AppColors.line)),
+        shape: WidgetStatePropertyAll(
+          RoundedRectangleBorder(borderRadius: BorderRadius.circular(24)),
+        ),
+        textStyle: const WidgetStatePropertyAll(
+          TextStyle(fontWeight: FontWeight.w800),
+        ),
       ),
     ),
     inputDecorationTheme: InputDecorationTheme(
       filled: true,
       fillColor: Colors.white,
-      border: OutlineInputBorder(borderRadius: BorderRadius.circular(16)),
+      contentPadding: const EdgeInsets.symmetric(horizontal: 18, vertical: 18),
+      border: OutlineInputBorder(borderRadius: BorderRadius.circular(18)),
     ),
   );
 }
@@ -532,11 +567,24 @@ class HomeScreen extends StatefulWidget {
   State<HomeScreen> createState() => _HomeScreenState();
 }
 
+class _MovementAlertEntry {
+  const _MovementAlertEntry({
+    required this.createdAt,
+    required this.intensity,
+    required this.message,
+  });
+
+  final DateTime createdAt;
+  final int intensity;
+  final String message;
+}
+
 class _HomeScreenState extends State<HomeScreen> {
   int _selectedIndex = 0;
   int _fetusStyle = 0;
   bool _deviceOn = false;
   bool _hasUnreadAlert = false;
+  final List<_MovementAlertEntry> _alerts = [];
   String _sensorStatus = '복부 센서 자동 수신 준비 중';
   late int _profileStyle = widget.initialProfileStyle;
   late int _profileBackgroundIndex = widget.initialProfileBackgroundIndex;
@@ -556,10 +604,17 @@ class _HomeScreenState extends State<HomeScreen> {
     await _saveCustomProfileImage(widget.user.id, value);
   }
 
+  void _addMovementAlert(_MovementAlertEntry alert) {
+    setState(() {
+      _alerts.insert(0, alert);
+      _hasUnreadAlert = true;
+    });
+  }
+
   @override
   void initState() {
     super.initState();
-    MonitoringPage.isDeviceOnForUser(widget.user.id).then((value) {
+    _MonitoringPage.isDeviceOnForUser(widget.user.id).then((value) {
       if (mounted) setState(() => _deviceOn = value);
     });
   }
@@ -568,8 +623,8 @@ class _HomeScreenState extends State<HomeScreen> {
   Widget build(BuildContext context) {
     final pages = [
       _PageArtworkBackground(
-        asset: 'assets/images/background/backgroundHome.png',
-        child: DashboardPage(
+        asset: 'assets/images/background/stainbackground.png',
+        child: _DashboardPage(
           userId: widget.user.id,
           fetusName: widget.fetusName,
           fetusStyle: _fetusStyle,
@@ -578,9 +633,15 @@ class _HomeScreenState extends State<HomeScreen> {
           profileBackgroundIndex: _profileBackgroundIndex,
           profileImageBytes: _profileImageBytes,
           hasUnreadAlert: _hasUnreadAlert,
+          alerts: _alerts,
           onOpenReport: () => setState(() => _selectedIndex = 2),
           onOpenAccount: () => setState(() => _selectedIndex = 3),
           onAlertsViewed: () => setState(() => _hasUnreadAlert = false),
+          onDeleteAlert: (alert) => setState(() => _alerts.remove(alert)),
+          onClearAlerts: () => setState(() {
+            _alerts.clear();
+            _hasUnreadAlert = false;
+          }),
           onChangeFetusStyle: (value) => setState(() {
             _fetusStyle = value;
             _fetusImageBytes = null;
@@ -590,19 +651,19 @@ class _HomeScreenState extends State<HomeScreen> {
         ),
       ),
       _PageArtworkBackground(
-        asset: 'assets/images/background/backgroundMonitoring.png',
-        child: MonitoringPage(
+        asset: 'assets/images/background/backgroundReport.png',
+        child: _MonitoringPage(
           userId: widget.user.id,
           fetusName: widget.fetusName,
           onOpenReport: () => setState(() => _selectedIndex = 2),
           onDeviceStateChanged: (value) => setState(() => _deviceOn = value),
           onSensorStatusChanged: (value) =>
               setState(() => _sensorStatus = value),
-          onMovementRecorded: () => setState(() => _hasUnreadAlert = true),
+          onMovementRecorded: _addMovementAlert,
         ),
       ),
       _PageArtworkBackground(
-        asset: 'assets/images/background/backgroundReport.png',
+        asset: 'assets/images/background/stainbackground.png',
         child: ReportPage(userId: widget.user.id),
       ),
       _PageArtworkBackground(
@@ -618,7 +679,7 @@ class _HomeScreenState extends State<HomeScreen> {
           authRepository: widget.authRepository,
           onUserChanged: (user) => widget.onUserChanged(user),
           onLogout: () async {
-            await MonitoringPage.stopDeviceForUser(widget.user.id);
+            await _MonitoringPage.stopDeviceForUser(widget.user.id);
             await widget.authRepository.logout();
             widget.onSignedOut();
           },
@@ -705,10 +766,10 @@ class _PngBottomNavigationBar extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final screenWidth = MediaQuery.sizeOf(context).width;
-    final holderWidth = math.min(298.0, screenWidth - 48);
+    final holderWidth = math.min(314.0, screenWidth - 44);
     final holderHeight = holderWidth * 76 / 298;
     const sideInset = 5.0;
-    const gap = 8.0;
+    const gap = 7.0;
     final iconSize = math.max(44.0, holderHeight - 10);
 
     return Center(
@@ -758,9 +819,8 @@ class _PngBottomNavigationBar extends StatelessWidget {
   }
 }
 
-class DashboardPage extends StatelessWidget {
-  const DashboardPage({
-    super.key,
+class _DashboardPage extends StatelessWidget {
+  const _DashboardPage({
     required this.userId,
     required this.fetusName,
     required this.fetusStyle,
@@ -769,9 +829,12 @@ class DashboardPage extends StatelessWidget {
     required this.profileBackgroundIndex,
     this.profileImageBytes,
     required this.hasUnreadAlert,
+    required this.alerts,
     required this.onOpenReport,
     required this.onOpenAccount,
     required this.onAlertsViewed,
+    required this.onDeleteAlert,
+    required this.onClearAlerts,
     required this.onChangeFetusStyle,
     required this.onChangeFetusImage,
   });
@@ -783,16 +846,19 @@ class DashboardPage extends StatelessWidget {
   final int profileBackgroundIndex;
   final Uint8List? profileImageBytes;
   final bool hasUnreadAlert;
+  final List<_MovementAlertEntry> alerts;
   final VoidCallback onOpenReport;
   final VoidCallback onOpenAccount;
   final VoidCallback onAlertsViewed;
+  final ValueChanged<_MovementAlertEntry> onDeleteAlert;
+  final VoidCallback onClearAlerts;
   final ValueChanged<int> onChangeFetusStyle;
   final ValueChanged<Uint8List> onChangeFetusImage;
 
   @override
   Widget build(BuildContext context) {
     return ListView(
-      padding: const EdgeInsets.fromLTRB(24, 22, 24, 120),
+      padding: const EdgeInsets.fromLTRB(24, 30, 24, 130),
       children: [
         Row(
           children: [
@@ -808,25 +874,57 @@ class DashboardPage extends StatelessWidget {
                 radius: 22,
               ),
             ),
-            const SizedBox(width: 10),
-            IconButton.filledTonal(
+            const SizedBox(width: 12),
+            GestureDetector(
               key: const Key('homeAlertButton'),
-              tooltip: '알림',
-              onPressed: () {
+              onTap: () {
                 onAlertsViewed();
-                _showAlerts(context);
+                _showAlerts(
+                  context,
+                  alerts: alerts,
+                  onDelete: onDeleteAlert,
+                  onClear: onClearAlerts,
+                );
               },
-              icon: Image.asset(
-                hasUnreadAlert
-                    ? 'assets/images/icon/nowAlert.png'
-                    : 'assets/images/icon/alert.png',
-                width: 24,
-                height: 24,
+              child: Container(
+                width: 48,
+                height: 48,
+                decoration: const BoxDecoration(
+                  color: Colors.white,
+                  shape: BoxShape.circle,
+                ),
+                child: Stack(
+                  alignment: Alignment.center,
+                  clipBehavior: Clip.none,
+                  children: [
+                    Image.asset(
+                      'assets/images/icon/alert.png',
+                      width: 30,
+                      height: 30,
+                      fit: BoxFit.contain,
+                      color: AppColors.ink,
+                    ),
+                    Positioned(
+                      top: 12,
+                      right: 11,
+                      child: Container(
+                        width: 8,
+                        height: 8,
+                        decoration: BoxDecoration(
+                          color: hasUnreadAlert
+                              ? AppColors.coral
+                              : AppColors.coral.withValues(alpha: .9),
+                          shape: BoxShape.circle,
+                        ),
+                      ),
+                    ),
+                  ],
+                ),
               ),
             ),
           ],
         ),
-        const SizedBox(height: 18),
+        const SizedBox(height: 22),
         _TodayHeroCard(
           userId: userId,
           fetusStyle: fetusStyle,
@@ -834,9 +932,9 @@ class DashboardPage extends StatelessWidget {
           onChangeFetusStyle: onChangeFetusStyle,
           onChangeFetusImage: onChangeFetusImage,
         ),
-        const SizedBox(height: 18),
+        const SizedBox(height: 22),
         _MovementFlowCard(userId: userId, onOpenReport: onOpenReport),
-        const SizedBox(height: 18),
+        const SizedBox(height: 22),
         const _CareNotice(),
       ],
     );
@@ -849,20 +947,28 @@ class _HomeHeadline extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final name = fetusName.trim().isEmpty ? 'Ding-Dong' : fetusName.trim();
-    final fontSize = math.max(20.0, 32.0 - math.max(0, name.length - 8) * .62);
-    return FittedBox(
-      fit: BoxFit.scaleDown,
-      alignment: Alignment.centerLeft,
-      child: ConstrainedBox(
-        constraints: const BoxConstraints(maxWidth: 260),
-        child: Text(
-          '오늘\n$name의\n태동이예요!',
-          maxLines: 3,
-          overflow: TextOverflow.ellipsis,
-          style: Theme.of(context).textTheme.headlineMedium?.copyWith(
-            fontSize: fontSize,
-            height: 1.12,
-          ),
+    final fontSize = math.max(18.0, 30.0 - math.max(0, name.length - 8) * .62);
+    final baseStyle = Theme.of(context).textTheme.headlineMedium?.copyWith(
+      fontSize: fontSize,
+      height: 1.12,
+      fontWeight: FontWeight.w400,
+      letterSpacing: 0,
+    );
+    return ConstrainedBox(
+      constraints: const BoxConstraints(maxWidth: 260),
+      child: RichText(
+        maxLines: 3,
+        overflow: TextOverflow.ellipsis,
+        text: TextSpan(
+          style: baseStyle,
+          children: [
+            const TextSpan(text: '오늘\n'),
+            TextSpan(
+              text: name,
+              style: baseStyle?.copyWith(fontWeight: FontWeight.w800),
+            ),
+            const TextSpan(text: '의\n태동이에요!'),
+          ],
         ),
       ),
     );
@@ -887,9 +993,9 @@ class _TodayHeroCard extends StatelessWidget {
     final movementRepository = MovementRepository();
     final today = _dateOnly(DateTime.now());
     return SizedBox(
-      height: 240,
-      child: Card(
-        clipBehavior: Clip.antiAlias,
+      height: 360,
+      child: ClipRRect(
+        borderRadius: BorderRadius.circular(24),
         child: Stack(
           children: [
             Positioned.fill(
@@ -905,29 +1011,35 @@ class _TodayHeroCard extends StatelessWidget {
               ),
             ),
             Positioned(
-              top: 16,
-              right: 16,
+              top: 28,
+              right: 22,
               child: _MiniPill(
                 label: '정상 범위 유지 중',
                 foreground: AppColors.ink,
-                background: Colors.white.withValues(alpha: .85),
+                background: Colors.white.withValues(alpha: .5),
               ),
             ),
             Positioned(
-              left: 16,
-              bottom: 18,
+              left: 18,
+              bottom: 22,
               child: Container(
-                padding: const EdgeInsets.all(12),
+                padding: const EdgeInsets.symmetric(
+                  horizontal: 12,
+                  vertical: 9,
+                ),
                 decoration: BoxDecoration(
-                  color: Colors.white.withValues(alpha: .9),
-                  borderRadius: BorderRadius.circular(16),
+                  color: Colors.white.withValues(alpha: .5),
+                  borderRadius: BorderRadius.circular(20),
+                  border: Border.all(color: Colors.white),
                 ),
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
                     Text(
                       '태동 감지',
-                      style: Theme.of(context).textTheme.labelSmall,
+                      style: Theme.of(context).textTheme.labelSmall?.copyWith(
+                        fontWeight: FontWeight.w500,
+                      ),
                     ),
                     Text.rich(
                       TextSpan(
@@ -946,15 +1058,19 @@ class _TodayHeroCard extends StatelessWidget {
                               initialData: 0,
                               builder: (context, snapshot) => Text(
                                 '${snapshot.data ?? 0}',
-                                style: Theme.of(
-                                  context,
-                                ).textTheme.headlineSmall,
+                                style: Theme.of(context)
+                                    .textTheme
+                                    .headlineSmall
+                                    ?.copyWith(fontWeight: FontWeight.w900),
                               ),
                             ),
                           ),
                           const TextSpan(
                             text: '회',
-                            style: TextStyle(fontSize: 16),
+                            style: TextStyle(
+                              fontSize: 16,
+                              fontWeight: FontWeight.w400,
+                            ),
                           ),
                         ],
                       ),
@@ -964,8 +1080,8 @@ class _TodayHeroCard extends StatelessWidget {
               ),
             ),
             Positioned(
-              right: 14,
-              bottom: 14,
+              right: 18,
+              bottom: 18,
               child: GestureDetector(
                 onLongPress: () => _showFetusPicker(
                   context,
@@ -975,6 +1091,10 @@ class _TodayHeroCard extends StatelessWidget {
                 child: IconButton.filledTonal(
                   tooltip: fetusStyle == 1 ? '추상 태아 이미지로 변경' : '실사 태아 이미지로 변경',
                   onPressed: () => onChangeFetusStyle(fetusStyle == 0 ? 1 : 0),
+                  style: IconButton.styleFrom(
+                    backgroundColor: Colors.white.withValues(alpha: .5),
+                    foregroundColor: AppColors.ink,
+                  ),
                   icon: Image.asset(
                     fetusStyle == 1
                         ? 'assets/images/icon/painting.png'
@@ -1003,7 +1123,7 @@ class _MovementFlowCard extends StatelessWidget {
     final start = today.subtract(const Duration(days: 6));
     return Card(
       child: Padding(
-        padding: const EdgeInsets.all(18),
+        padding: const EdgeInsets.fromLTRB(20, 14, 20, 18),
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
@@ -1023,10 +1143,10 @@ class _MovementFlowCard extends StatelessWidget {
                 ),
               ],
             ),
-            const SizedBox(height: 8),
+            const SizedBox(height: 16),
             SizedBox(
               width: double.infinity,
-              height: 150,
+              height: 190,
               child: FutureBuilder<List<FetalMovementRecord>>(
                 future: movementRepository.findRecords(
                   userId: userId,
@@ -1068,9 +1188,8 @@ class _MovementFlowCard extends StatelessWidget {
   }
 }
 
-class MonitoringPage extends StatefulWidget {
-  const MonitoringPage({
-    super.key,
+class _MonitoringPage extends StatefulWidget {
+  const _MonitoringPage({
     required this.userId,
     required this.fetusName,
     required this.onOpenReport,
@@ -1083,7 +1202,7 @@ class MonitoringPage extends StatefulWidget {
   final VoidCallback onOpenReport;
   final ValueChanged<bool> onDeviceStateChanged;
   final ValueChanged<String> onSensorStatusChanged;
-  final VoidCallback onMovementRecorded;
+  final ValueChanged<_MovementAlertEntry> onMovementRecorded;
 
   static String _prefKey(String userId, String name) =>
       'monitoring.$userId.$name';
@@ -1119,10 +1238,10 @@ class MonitoringPage extends StatefulWidget {
   }
 
   @override
-  State<MonitoringPage> createState() => _MonitoringPageState();
+  State<_MonitoringPage> createState() => _MonitoringPageState();
 }
 
-class _MonitoringPageState extends State<MonitoringPage>
+class _MonitoringPageState extends State<_MonitoringPage>
     with SingleTickerProviderStateMixin {
   final MovementRepository _movementRepository = MovementRepository();
   final BeltMovementDetector _movementDetector = BeltMovementDetector();
@@ -1140,6 +1259,7 @@ class _MonitoringPageState extends State<MonitoringPage>
   Duration _pausedElapsed = Duration.zero;
   bool _deviceOn = true;
   bool _recordingMovement = false;
+  bool _showManualRecordChoices = false;
   bool _sensorConnecting = false;
   bool _userMoving = false;
   bool _movementActive = false;
@@ -1151,11 +1271,11 @@ class _MonitoringPageState extends State<MonitoringPage>
   DateTime? _startedAt;
   DateTime _activeDate = DateTime.now();
 
-  String get _onKey => MonitoringPage._prefKey(widget.userId, 'deviceOn');
-  String get _startKey => MonitoringPage._prefKey(widget.userId, 'startedAt');
+  String get _onKey => _MonitoringPage._prefKey(widget.userId, 'deviceOn');
+  String get _startKey => _MonitoringPage._prefKey(widget.userId, 'startedAt');
   String get _elapsedKey =>
-      MonitoringPage._prefKey(widget.userId, 'pausedElapsed');
-  String get _dateKey => MonitoringPage._prefKey(widget.userId, 'activeDate');
+      _MonitoringPage._prefKey(widget.userId, 'pausedElapsed');
+  String get _dateKey => _MonitoringPage._prefKey(widget.userId, 'activeDate');
 
   void _setSensorStatus(String status) {
     if (_sensorStatus == status) return;
@@ -1369,7 +1489,13 @@ class _MonitoringPageState extends State<MonitoringPage>
       _sensorStatus = '태동 감지됨';
     });
     widget.onSensorStatusChanged('태동 감지됨');
-    widget.onMovementRecorded();
+    widget.onMovementRecorded(
+      _MovementAlertEntry(
+        createdAt: event.measuredAt,
+        intensity: event.intensity,
+        message: _recordMessage ?? message,
+      ),
+    );
   }
 
   Future<void> _recordMovement(int intensity, String label) async {
@@ -1396,8 +1522,15 @@ class _MonitoringPageState extends State<MonitoringPage>
       setState(() {
         _lastAlertMessage = message;
         _recordMessage = message;
+        _showManualRecordChoices = false;
       });
-      widget.onMovementRecorded();
+      widget.onMovementRecorded(
+        _MovementAlertEntry(
+          createdAt: now,
+          intensity: intensity,
+          message: message,
+        ),
+      );
     } finally {
       if (mounted) setState(() => _recordingMovement = false);
     }
@@ -1406,7 +1539,7 @@ class _MonitoringPageState extends State<MonitoringPage>
   @override
   Widget build(BuildContext context) {
     return ListView(
-      padding: const EdgeInsets.fromLTRB(24, 20, 24, 120),
+      padding: const EdgeInsets.fromLTRB(24, 48, 24, 130),
       children: [
         Center(
           child: Column(
@@ -1431,67 +1564,16 @@ class _MonitoringPageState extends State<MonitoringPage>
             ],
           ),
         ),
-        const SizedBox(height: 36),
+        const SizedBox(height: 46),
         SizedBox(
-          height: 238,
-          child: AnimatedBuilder(
-            animation: _waveController,
-            builder: (context, _) => _MonitoringAssetWave(
-              phase: _waveController.value,
-              active: _deviceOn,
-              userMoving: _userMoving,
-              movementActive: _movementActive,
-            ),
+          height: 318,
+          child: WaveMonitorWidget(
+            connected: _sensorSocket != null,
+            userMoving: _userMoving,
+            movementActive: _movementActive,
           ),
         ),
-        const SizedBox(height: 28),
-        Row(
-          children: [
-            Expanded(
-              child: ElevatedButton.icon(
-                key: const Key('recordWeakMovementButton'),
-                onPressed: _recordingMovement
-                    ? null
-                    : () => unawaited(_recordMovement(2000, '약한')),
-                icon: _recordingMovement
-                    ? const _ButtonLoader()
-                    : const Icon(Icons.touch_app_outlined),
-                label: const Text('약'),
-              ),
-            ),
-            const SizedBox(width: 8),
-            Expanded(
-              child: ElevatedButton.icon(
-                key: const Key('recordNormalMovementButton'),
-                onPressed: _recordingMovement
-                    ? null
-                    : () => unawaited(_recordMovement(3000, '보통')),
-                icon: const Icon(Icons.sensors_outlined),
-                label: const Text('중'),
-              ),
-            ),
-            const SizedBox(width: 8),
-            Expanded(
-              child: ElevatedButton.icon(
-                key: const Key('recordStrongMovementButton'),
-                onPressed: _recordingMovement
-                    ? null
-                    : () => unawaited(_recordMovement(3600, '강한')),
-                icon: const Icon(Icons.vibration_outlined),
-                label: const Text('강'),
-              ),
-            ),
-          ],
-        ),
-        if (_recordMessage != null) ...[
-          const SizedBox(height: 8),
-          Text(
-            _recordMessage!,
-            textAlign: TextAlign.center,
-            style: Theme.of(context).textTheme.bodySmall,
-          ),
-        ],
-        const SizedBox(height: 12),
+        const SizedBox(height: 20),
         Row(
           children: [
             const Expanded(
@@ -1515,7 +1597,7 @@ class _MonitoringPageState extends State<MonitoringPage>
           padding: const EdgeInsets.symmetric(vertical: 16),
           decoration: BoxDecoration(
             color: AppColors.ink,
-            borderRadius: BorderRadius.circular(18),
+            borderRadius: BorderRadius.circular(24),
           ),
           child: Column(
             children: [
@@ -1535,6 +1617,53 @@ class _MonitoringPageState extends State<MonitoringPage>
             ],
           ),
         ),
+        const SizedBox(height: 12),
+        ElevatedButton.icon(
+          key: const Key('openManualMovementPickerButton'),
+          onPressed: _recordingMovement
+              ? null
+              : () => setState(
+                    () => _showManualRecordChoices =
+                        !_showManualRecordChoices,
+                  ),
+          icon: _recordingMovement
+              ? const _ButtonLoader()
+              : const Icon(Icons.touch_app_outlined),
+          label: const Text('태동 기록 저장'),
+        ),
+        if (_showManualRecordChoices) ...[
+          const SizedBox(height: 10),
+          Row(
+            children: [
+              Expanded(
+                child: OutlinedButton(
+                  onPressed: _recordingMovement
+                      ? null
+                      : () => unawaited(_recordMovement(2000, '약함')),
+                  child: const Text('약함'),
+                ),
+              ),
+              const SizedBox(width: 8),
+              Expanded(
+                child: OutlinedButton(
+                  onPressed: _recordingMovement
+                      ? null
+                      : () => unawaited(_recordMovement(3000, '중간')),
+                  child: const Text('중간'),
+                ),
+              ),
+              const SizedBox(width: 8),
+              Expanded(
+                child: OutlinedButton(
+                  onPressed: _recordingMovement
+                      ? null
+                      : () => unawaited(_recordMovement(3600, '강함')),
+                  child: const Text('강함'),
+                ),
+              ),
+            ],
+          ),
+        ],
         const SizedBox(height: 10),
         Align(
           alignment: Alignment.centerRight,
@@ -1545,7 +1674,7 @@ class _MonitoringPageState extends State<MonitoringPage>
             label: const Text('타임라인 보기'),
           ),
         ),
-        const SizedBox(height: 14),
+        const SizedBox(height: 18),
         const _CareNotice(),
       ],
     );
@@ -1614,6 +1743,27 @@ class _ReportPageState extends State<ReportPage> {
     return '${_selectedDate.year}.${_selectedDate.month.toString().padLeft(2, '0')}';
   }
 
+  void _movePeriod(int delta) {
+    setState(() {
+      if (_range == 0) {
+        _selectedDate = _dateOnly(
+          _selectedDate.add(Duration(days: delta)),
+        );
+      } else if (_range == 1) {
+        _selectedDate = _dateOnly(
+          _selectedDate.add(Duration(days: delta * 7)),
+        );
+      } else {
+        _selectedDate = DateTime(
+          _selectedDate.year,
+          _selectedDate.month + delta,
+        );
+      }
+      final today = _today;
+      if (_selectedDate.isAfter(today)) _selectedDate = today;
+    });
+  }
+
   DateTime get _periodStart {
     if (_range == 0) return _dateOnly(_selectedDate);
     if (_range == 1) return _selectedWeekStart;
@@ -1651,10 +1801,10 @@ class _ReportPageState extends State<ReportPage> {
     DateTime? activeStart;
     final prefs = await SharedPreferences.getInstance();
     final on =
-        prefs.getBool(MonitoringPage._prefKey(widget.userId, 'deviceOn')) ??
+        prefs.getBool(_MonitoringPage._prefKey(widget.userId, 'deviceOn')) ??
         false;
     final startedAtMillis = prefs.getInt(
-      MonitoringPage._prefKey(widget.userId, 'startedAt'),
+      _MonitoringPage._prefKey(widget.userId, 'startedAt'),
     );
     if (on && startedAtMillis != null) {
       final startedAt = DateTime.fromMillisecondsSinceEpoch(startedAtMillis);
@@ -1678,6 +1828,9 @@ class _ReportPageState extends State<ReportPage> {
           (record) => _ReportMoment(
             hour: record.measuredAt.hour + record.measuredAt.minute / 60,
             value: _sensorIntensityRatio(record.intensity),
+            measuredAt: record.measuredAt,
+            intensity: record.intensity,
+            measuredDuringUserMotion: record.measuredDuringUserMotion,
           ),
         )
         .toList();
@@ -1733,6 +1886,7 @@ class _ReportPageState extends State<ReportPage> {
         xPositions: _evenPositions(7),
         topInset: 24,
         highlightIndex: _todayIndexInWeek(),
+        zoomMax: 1,
       ),
       intensity: _ReportData(
         title: '태동 세기',
@@ -1750,6 +1904,7 @@ class _ReportPageState extends State<ReportPage> {
         displayMax: 100,
         xPositions: _evenPositions(7),
         highlightIndex: _todayIndexInWeek(),
+        zoomMax: 1,
       ),
     );
   }
@@ -1855,18 +2010,14 @@ class _ReportPageState extends State<ReportPage> {
   @override
   Widget build(BuildContext context) {
     return ListView(
-      padding: const EdgeInsets.fromLTRB(24, 20, 24, 120),
+      padding: const EdgeInsets.fromLTRB(24, 42, 24, 130),
       children: [
         Row(
           children: [
-            IconButton.filledTonal(
+            _ReportCircleIconButton(
               tooltip: '공유',
               onPressed: () {},
-              icon: Image.asset(
-                'assets/images/icon/upload.png',
-                width: 22,
-                height: 22,
-              ),
+              asset: 'assets/images/icon/upload.png',
             ),
             Expanded(
               child: Center(
@@ -1876,39 +2027,63 @@ class _ReportPageState extends State<ReportPage> {
                 ),
               ),
             ),
-            IconButton.filledTonal(
+            _ReportCircleIconButton(
               tooltip: '달력',
               onPressed: _pickReportDate,
-              icon: Image.asset(
-                'assets/images/icon/calendar.png',
-                width: 22,
-                height: 22,
-              ),
+              asset: 'assets/images/icon/calendar.png',
             ),
           ],
         ),
         const SizedBox(height: 10),
         Center(
-          child: SegmentedButton<int>(
-            showSelectedIcon: false,
-            segments: const [
-              ButtonSegment(value: 0, label: Text('일간')),
-              ButtonSegment(value: 1, label: Text('주간')),
-              ButtonSegment(value: 2, label: Text('월간')),
-            ],
-            selected: {_range},
-            onSelectionChanged: (value) => setState(() {
-              _range = value.first;
+          child: _ReportRangeSelector(
+            selected: _range,
+            onChanged: (value) => setState(() {
+              _range = value;
               final today = _today;
               if (_selectedDate.isAfter(today)) _selectedDate = today;
             }),
           ),
         ),
-        const SizedBox(height: 10),
-        Text(
-          _rangeLabel,
-          textAlign: TextAlign.center,
-          style: Theme.of(context).textTheme.labelSmall,
+        const SizedBox(height: 12),
+        Row(
+          mainAxisAlignment: MainAxisAlignment.center,
+          children: [
+            IconButton(
+              visualDensity: const VisualDensity(horizontal: -4, vertical: -4),
+              constraints: const BoxConstraints.tightFor(width: 34, height: 34),
+              onPressed: () => _movePeriod(-1),
+              icon: const Icon(
+                Icons.chevron_left_rounded,
+                color: Colors.black,
+                size: 21,
+              ),
+            ),
+            ConstrainedBox(
+              constraints: const BoxConstraints(minWidth: 90),
+              child: Text(
+                _rangeLabel,
+                textAlign: TextAlign.center,
+                style: Theme.of(context).textTheme.labelSmall?.copyWith(
+                  color: AppColors.ink,
+                  fontSize: 13,
+                  fontWeight: FontWeight.w800,
+                ),
+              ),
+            ),
+            IconButton(
+              visualDensity: const VisualDensity(horizontal: -4, vertical: -4),
+              constraints: const BoxConstraints.tightFor(width: 34, height: 34),
+              onPressed: _selectedDate.isBefore(_today)
+                  ? () => _movePeriod(1)
+                  : null,
+              icon: const Icon(
+                Icons.chevron_right_rounded,
+                color: Colors.black,
+                size: 21,
+              ),
+            ),
+          ],
         ),
         const SizedBox(height: 18),
         FutureBuilder<List<FetalMovementRecord>>(
@@ -2269,9 +2444,9 @@ class _MyPageState extends State<MyPage> {
         ),
       ),
       const SizedBox(height: 14),
-      _buildDeviceCard(context),
-      const SizedBox(height: 14),
       _buildAlertSoundCard(context),
+      const SizedBox(height: 14),
+      _buildDeviceCard(context),
     ],
   );
 
@@ -2294,7 +2469,7 @@ class _MyPageState extends State<MyPage> {
 
   Widget _buildAccountInfoCard(BuildContext context) => Card(
     child: Padding(
-      padding: const EdgeInsets.all(18),
+      padding: const EdgeInsets.fromLTRB(20, 22, 20, 18),
       child: Form(
         key: _accountForm,
         child: Column(
@@ -2543,19 +2718,104 @@ class _MyPageState extends State<MyPage> {
             ],
           ),
           const SizedBox(height: 14),
-          Wrap(
-            spacing: 8,
-            runSpacing: 8,
-            children: [
-              for (var i = 0; i < _alertSoundAssets.length; i++)
-                ChoiceChip(
-                  key: Key('alertSoundChoice$i'),
-                  selected: _selectedAlertSound == _alertSoundAssets[i],
-                  label: Text('dingdong${i + 1}'),
-                  onSelected: (_) =>
-                      unawaited(_chooseAlertSound(_alertSoundAssets[i])),
+          OutlinedButton.icon(
+            key: const Key('openAlertSoundPickerButton'),
+            onPressed: () => _showAlertSoundPicker(context),
+            icon: const Icon(Icons.music_note_outlined),
+            label: const Text('알림음 선택'),
+          ),
+        ],
+      ),
+    ),
+  );
+
+  void _showAlertSoundPicker(BuildContext context) {
+    showModalBottomSheet<void>(
+      context: context,
+      backgroundColor: Colors.white,
+      isScrollControlled: true,
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(28)),
+      ),
+      builder: (context) => Padding(
+        padding: const EdgeInsets.fromLTRB(20, 14, 20, 34),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: [
+            Center(
+              child: Container(
+                width: 38,
+                height: 5,
+                decoration: BoxDecoration(
+                  color: AppColors.ink.withValues(alpha: .78),
+                  borderRadius: BorderRadius.circular(99),
                 ),
+              ),
+            ),
+            const SizedBox(height: 28),
+            Text('알림음 선택', style: Theme.of(context).textTheme.titleMedium),
+            const SizedBox(height: 18),
+            for (var i = 0; i < _alertSoundAssets.length; i++) ...[
+              _AlertSoundSheetRow(
+                key: Key('alertSoundChoice$i'),
+                title: i == 0 ? '알림음 1 (default)' : '알림음 ${i + 1}',
+                selected: _selectedAlertSound == _alertSoundAssets[i],
+                onSelect: () {
+                  unawaited(_chooseAlertSound(_alertSoundAssets[i]));
+                  Navigator.pop(context);
+                },
+                onPreview: () => unawaited(
+                  _playAlertSound(_alertSoundAssets[i]),
+                ),
+              ),
+              if (i != _alertSoundAssets.length - 1) const SizedBox(height: 12),
             ],
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+class _AlertSoundSheetRow extends StatelessWidget {
+  const _AlertSoundSheetRow({
+    super.key,
+    required this.title,
+    required this.selected,
+    required this.onSelect,
+    required this.onPreview,
+  });
+
+  final String title;
+  final bool selected;
+  final VoidCallback onSelect;
+  final VoidCallback onPreview;
+
+  @override
+  Widget build(BuildContext context) => InkWell(
+    onTap: onSelect,
+    borderRadius: BorderRadius.circular(18),
+    child: Container(
+      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 20),
+      decoration: BoxDecoration(
+        color: selected ? AppColors.peach : Colors.white,
+        borderRadius: BorderRadius.circular(18),
+        border: Border.all(color: AppColors.line),
+      ),
+      child: Row(
+        children: [
+          Expanded(
+            child: Text(
+              title,
+              style: Theme.of(context).textTheme.titleSmall,
+            ),
+          ),
+          TextButton.icon(
+            onPressed: onPreview,
+            icon: const Icon(Icons.play_arrow_rounded),
+            label: const Text('소리재생'),
+            style: TextButton.styleFrom(foregroundColor: AppColors.coralDark),
           ),
         ],
       ),
@@ -2587,13 +2847,13 @@ class _MyTabButton extends StatelessWidget {
         onTap: onTap,
         child: AnimatedContainer(
           duration: const Duration(milliseconds: 160),
-          padding: const EdgeInsets.symmetric(vertical: 14),
+          padding: const EdgeInsets.symmetric(vertical: 22),
           decoration: BoxDecoration(
-            color: selected ? AppColors.peach : Colors.transparent,
+            color: selected ? AppColors.peach : Colors.white.withValues(alpha: .6),
             border: Border(
               bottom: BorderSide(
                 color: selected ? AppColors.coral : AppColors.line,
-                width: selected ? 3 : 1,
+                width: selected ? 4 : 1,
               ),
             ),
           ),
@@ -2625,11 +2885,103 @@ class _ReportChartCard extends StatefulWidget {
   State<_ReportChartCard> createState() => _ReportChartCardState();
 }
 
+class _ReportCircleIconButton extends StatelessWidget {
+  const _ReportCircleIconButton({
+    required this.tooltip,
+    required this.asset,
+    required this.onPressed,
+  });
+
+  final String tooltip;
+  final String asset;
+  final VoidCallback onPressed;
+
+  @override
+  Widget build(BuildContext context) => Tooltip(
+    message: tooltip,
+    child: InkWell(
+      onTap: onPressed,
+      customBorder: const CircleBorder(),
+      child: Container(
+        width: 50,
+        height: 50,
+        decoration: const BoxDecoration(
+          color: Colors.white,
+          shape: BoxShape.circle,
+        ),
+        alignment: Alignment.center,
+        child: Image.asset(
+          asset,
+          width: 24,
+          height: 24,
+          color: AppColors.ink,
+        ),
+      ),
+    ),
+  );
+}
+
+class _ReportRangeSelector extends StatelessWidget {
+  const _ReportRangeSelector({
+    required this.selected,
+    required this.onChanged,
+  });
+
+  final int selected;
+  final ValueChanged<int> onChanged;
+
+  @override
+  Widget build(BuildContext context) {
+    const labels = ['일간', '주간', '월간'];
+    return Container(
+      width: 246,
+      height: 54,
+      padding: const EdgeInsets.all(3),
+      decoration: BoxDecoration(
+        color: AppColors.controlGray,
+        borderRadius: BorderRadius.circular(28),
+        border: Border.all(color: AppColors.line),
+      ),
+      child: Row(
+        children: [
+          for (var i = 0; i < labels.length; i++)
+            Expanded(
+              child: InkWell(
+                onTap: () => onChanged(i),
+                borderRadius: BorderRadius.circular(24),
+                child: AnimatedContainer(
+                  duration: const Duration(milliseconds: 160),
+                  alignment: Alignment.center,
+                  decoration: BoxDecoration(
+                    color: selected == i ? AppColors.ink : Colors.white,
+                    borderRadius: BorderRadius.circular(24),
+                    border: i == selected
+                        ? null
+                        : Border.all(color: AppColors.line.withValues(alpha: .8)),
+                  ),
+                  child: Text(
+                    labels[i],
+                    style: Theme.of(context).textTheme.titleSmall?.copyWith(
+                      color: selected == i ? Colors.white : AppColors.ink,
+                      fontSize: 16,
+                      fontWeight: FontWeight.w800,
+                    ),
+                  ),
+                ),
+              ),
+            ),
+        ],
+      ),
+    );
+  }
+}
+
 class _ReportChartCardState extends State<_ReportChartCard> {
   late final ScrollController _scrollController;
   late double _axisScale;
   double _gestureStartScale = 1;
   String? _dataKey;
+  List<_ReportMoment> _selectedMoments = const [];
 
   @override
   void initState() {
@@ -2657,6 +3009,7 @@ class _ReportChartCardState extends State<_ReportChartCard> {
     _dataKey = _chartDataKey(widget.data);
     _axisScale = widget.data.initialScale.clamp(1.0, widget.data.zoomMax);
     _gestureStartScale = _axisScale;
+    _selectedMoments = const [];
     _centerOnInitialPosition();
   }
 
@@ -2676,25 +3029,92 @@ class _ReportChartCardState extends State<_ReportChartCard> {
     });
   }
 
+  void _setAxisScale(double nextScale) {
+    setState(() {
+      _axisScale = nextScale.clamp(1.0, widget.data.zoomMax);
+      _gestureStartScale = _axisScale;
+    });
+  }
+
+  void _selectDailyDetail(TapUpDetails details, BoxConstraints constraints) {
+    if (widget.data.moments.isEmpty ||
+        (widget.data.mode != _ChartMode.dailyDots &&
+            widget.data.mode != _ChartMode.dailyBars)) {
+      return;
+    }
+    final contentWidth = constraints.maxWidth * _axisScale;
+    final tappedX = details.localPosition.dx + _scrollController.offset;
+    final tappedHour = (tappedX / contentWidth * 24).clamp(0.0, 24.0);
+    final sorted = [...widget.data.moments]
+      ..sort(
+        (a, b) => (a.hour - tappedHour).abs().compareTo(
+          (b.hour - tappedHour).abs(),
+        ),
+      );
+    final target = sorted.first.measuredAt;
+    if (target == null) return;
+    final bucket = widget.data.moments.where((moment) {
+      final measuredAt = moment.measuredAt;
+      return measuredAt != null &&
+          measuredAt.hour == target.hour &&
+          measuredAt.minute == target.minute;
+    }).toList()
+      ..sort((a, b) => a.measuredAt!.compareTo(b.measuredAt!));
+    setState(() => _selectedMoments = bucket);
+  }
+
   @override
   Widget build(BuildContext context) => Card(
     child: Padding(
-      padding: const EdgeInsets.all(18),
+      padding: const EdgeInsets.fromLTRB(18, 14, 18, 18),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          Text(
-            widget.data.title,
-            style: Theme.of(context).textTheme.titleSmall,
+          Row(
+            children: [
+              Expanded(
+                child: Text(
+                  widget.data.title,
+                  style: Theme.of(context).textTheme.titleSmall?.copyWith(
+                    fontSize: 17,
+                    fontWeight: FontWeight.w500,
+                  ),
+                ),
+              ),
+              if (widget.data.zoomMax > 1) ...[
+                IconButton(
+                  tooltip: '축소',
+                  iconSize: 22,
+                  onPressed: _axisScale <= 1
+                      ? null
+                      : () => _setAxisScale(_axisScale - .35),
+                  icon: const Icon(Icons.remove_circle_outline),
+                  color: AppColors.ink,
+                  visualDensity: const VisualDensity(horizontal: -4, vertical: -4),
+                ),
+                IconButton(
+                  tooltip: '확대',
+                  iconSize: 22,
+                  onPressed: _axisScale >= widget.data.zoomMax
+                      ? null
+                      : () => _setAxisScale(_axisScale + .35),
+                  icon: const Icon(Icons.add_circle_outline),
+                  color: AppColors.ink,
+                  visualDensity: const VisualDensity(horizontal: -4, vertical: -4),
+                ),
+              ],
+            ],
           ),
-          const SizedBox(height: 14),
+          const SizedBox(height: 12),
           SizedBox(
-            height: 150,
+            height: 178,
             width: double.infinity,
             child: LayoutBuilder(
               builder: (context, constraints) {
                 final width = constraints.maxWidth * _axisScale;
                 return GestureDetector(
+                  onTapUp: (details) =>
+                      _selectDailyDetail(details, constraints),
                   onScaleStart: (_) => _gestureStartScale = _axisScale,
                   onScaleUpdate: (details) {
                     if (details.pointerCount < 2) return;
@@ -2750,6 +3170,14 @@ class _ReportChartCardState extends State<_ReportChartCard> {
               },
             ),
           ),
+          if (_selectedMoments.isNotEmpty) ...[
+            const SizedBox(height: 12),
+            _DailyDetailCard(
+              title: widget.data.title,
+              moments: _selectedMoments,
+              onClose: () => setState(() => _selectedMoments = const []),
+            ),
+          ],
         ],
       ),
     ),
@@ -2760,6 +3188,77 @@ class _DeviceTimelineData {
   const _DeviceTimelineData({required this.sessions, this.activeStart});
   final List<DeviceUsageSession> sessions;
   final DateTime? activeStart;
+}
+
+class _DailyDetailCard extends StatelessWidget {
+  const _DailyDetailCard({
+    required this.title,
+    required this.moments,
+    required this.onClose,
+  });
+
+  final String title;
+  final List<_ReportMoment> moments;
+  final VoidCallback onClose;
+
+  @override
+  Widget build(BuildContext context) {
+    final first = moments.first.measuredAt;
+    final minuteLabel = first == null
+        ? ''
+        : '${first.hour.toString().padLeft(2, '0')}:${first.minute.toString().padLeft(2, '0')}';
+    final isCount = title.contains('횟수');
+    return Container(
+      padding: const EdgeInsets.fromLTRB(14, 12, 8, 14),
+      decoration: BoxDecoration(
+        color: Colors.white,
+        borderRadius: BorderRadius.circular(18),
+        border: Border.all(color: AppColors.line),
+        boxShadow: [
+          BoxShadow(
+            color: Colors.black.withValues(alpha: .05),
+            blurRadius: 12,
+            offset: const Offset(0, 4),
+          ),
+        ],
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          Row(
+            children: [
+              Expanded(
+                child: Text(
+                  minuteLabel,
+                  textAlign: TextAlign.center,
+                  style: Theme.of(context).textTheme.titleSmall,
+                ),
+              ),
+              IconButton(
+                tooltip: '닫기',
+                onPressed: onClose,
+                icon: const Icon(Icons.close_rounded, size: 18),
+                visualDensity: VisualDensity.compact,
+              ),
+            ],
+          ),
+          const SizedBox(height: 4),
+          for (final moment in moments)
+            Padding(
+              padding: const EdgeInsets.symmetric(vertical: 3),
+              child: Text(
+                isCount
+                    ? '${_formatClock(moment.measuredAt)} 태동: 1회${moment.measuredDuringUserMotion ? ' (사용자의 움직임이 센서 값에 섞여있어요)' : ''}'
+                    : '${_formatClock(moment.measuredAt)} 세기: ${(_sensorIntensityRatio(moment.intensity ?? 0) * 100).round()}% (${_intensityLabel(moment.intensity ?? 0)})${moment.measuredDuringUserMotion ? ' (사용자의 움직임이 센서 값에 섞여있어요)' : ''}',
+                style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                  fontWeight: FontWeight.w700,
+                ),
+              ),
+            ),
+        ],
+      ),
+    );
+  }
 }
 
 class _DeviceTimelineCard extends StatefulWidget {
@@ -2834,14 +3333,14 @@ class _DeviceTimelineCardState extends State<_DeviceTimelineCard> {
   @override
   Widget build(BuildContext context) => Card(
     child: Padding(
-      padding: const EdgeInsets.all(18),
+      padding: const EdgeInsets.fromLTRB(20, 22, 20, 18),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           Text('기기 사용 타임라인', style: Theme.of(context).textTheme.titleSmall),
-          const SizedBox(height: 14),
+          const SizedBox(height: 20),
           SizedBox(
-            height: widget.range == 0 ? 82 : 150,
+            height: widget.range == 0 ? 96 : 178,
             width: double.infinity,
             child: LayoutBuilder(
               builder: (context, constraints) {
@@ -2940,9 +3439,11 @@ class _ReportCalendarDialogState extends State<_ReportCalendarDialog> {
         ? DateTime(selected.year, selected.month + 1, 0)
         : selected;
     return Dialog(
-      insetPadding: const EdgeInsets.all(22),
+      backgroundColor: Colors.white,
+      insetPadding: const EdgeInsets.symmetric(horizontal: 22, vertical: 40),
+      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(28)),
       child: Padding(
-        padding: const EdgeInsets.all(18),
+        padding: const EdgeInsets.fromLTRB(22, 22, 22, 26),
         child: Column(
           mainAxisSize: MainAxisSize.min,
           children: [
@@ -2957,7 +3458,7 @@ class _ReportCalendarDialogState extends State<_ReportCalendarDialog> {
                           ),
                         )
                       : null,
-                  icon: const Icon(Icons.chevron_left),
+                  icon: const Icon(Icons.chevron_left, size: 30),
                 ),
                 Expanded(
                   child: Text(
@@ -2975,7 +3476,7 @@ class _ReportCalendarDialogState extends State<_ReportCalendarDialog> {
                           ),
                         )
                       : null,
-                  icon: const Icon(Icons.chevron_right),
+                  icon: const Icon(Icons.chevron_right, size: 30),
                 ),
               ],
             ),
@@ -3013,16 +3514,16 @@ class _ReportCalendarDialogState extends State<_ReportCalendarDialog> {
                   onTap: enabled
                       ? () => Navigator.pop(context, _dateOnly(date))
                       : null,
-                  borderRadius: BorderRadius.circular(12),
+                  borderRadius: BorderRadius.circular(16),
                   child: Container(
                     alignment: Alignment.center,
                     decoration: BoxDecoration(
                       color: isSelected
                           ? AppColors.coral
                           : inRange
-                          ? AppColors.peach.withValues(alpha: .72)
+                          ? AppColors.peach.withValues(alpha: .74)
                           : Colors.transparent,
-                      borderRadius: BorderRadius.circular(12),
+                      borderRadius: BorderRadius.circular(16),
                     ),
                     child: Text(
                       '${date.day}',
@@ -3064,17 +3565,29 @@ class _StatusTile extends StatelessWidget {
   final String value;
   @override
   Widget build(BuildContext context) => Container(
-    padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 14),
+    constraints: const BoxConstraints(minHeight: 92),
+    padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 18),
     decoration: BoxDecoration(
-      color: AppColors.surface,
-      borderRadius: BorderRadius.circular(14),
+      color: Colors.white.withValues(alpha: .9),
+      borderRadius: BorderRadius.circular(18),
       border: Border.all(color: AppColors.line),
     ),
     child: Column(
+      mainAxisAlignment: MainAxisAlignment.center,
       children: [
         Text(title, style: Theme.of(context).textTheme.labelSmall),
-        const SizedBox(height: 5),
-        Text(value, style: Theme.of(context).textTheme.titleSmall),
+        const SizedBox(height: 8),
+        FittedBox(
+          fit: BoxFit.scaleDown,
+          child: Text(
+            value,
+            maxLines: 1,
+            style: Theme.of(context).textTheme.titleSmall?.copyWith(
+              fontSize: 18,
+              fontWeight: FontWeight.w900,
+            ),
+          ),
+        ),
       ],
     ),
   );
@@ -3216,39 +3729,45 @@ class _FloatingFetusViewerState extends State<_FloatingFetusViewer>
             : Offset(math.cos(t) * 7, math.sin(t * 1.4) * 6);
         return LayoutBuilder(
           builder: (context, constraints) {
-            final diameter =
-                math.min(constraints.maxWidth, constraints.maxHeight) * .78;
-            return Stack(
-              fit: StackFit.expand,
-              children: [
-                const CustomPaint(painter: _FetusCirclePainter()),
-                Center(
-                  child: ClipOval(
-                    child: SizedBox(
-                      width: diameter,
-                      height: diameter,
-                      child: Transform.translate(
-                        offset: floatingOffset,
-                        child: widget.imageBytes != null
-                            ? Image.memory(
-                                widget.imageBytes!,
-                                fit: BoxFit.cover,
-                              )
-                            : Transform.scale(
-                                scale: 1.34,
-                                child: Image.asset(
-                                  widget.style == 0
-                                      ? _fetusAbstractObjectAsset
-                                      : _fetusRealObjectAsset,
-                                  fit: BoxFit.contain,
-                                ),
-                              ),
+            final imageSize =
+                math.min(constraints.maxWidth, constraints.maxHeight) * .84;
+            if (widget.imageBytes == null && widget.style == 1) {
+              return Align(
+                alignment: Alignment.centerLeft,
+                child: SizedBox(
+                  width: imageSize,
+                  height: imageSize,
+                  child: Transform.translate(
+                    offset: floatingOffset,
+                    child: Transform.scale(
+                      alignment: Alignment.centerLeft,
+                      scale: .83,
+                      child: Image.asset(
+                        _fetusRealObjectAsset,
+                        fit: BoxFit.contain,
                       ),
                     ),
                   ),
                 ),
-                const CustomPaint(painter: _FetusCircleBorderPainter()),
-              ],
+              );
+            }
+            return Center(
+              child: SizedBox(
+                width: imageSize,
+                height: imageSize,
+                child: Transform.translate(
+                  offset: floatingOffset,
+                  child: widget.imageBytes != null
+                      ? Image.memory(widget.imageBytes!, fit: BoxFit.contain)
+                      : Transform.scale(
+                          scale: 1.08,
+                          child: Image.asset(
+                            _fetusAbstractObjectAsset,
+                            fit: BoxFit.contain,
+                          ),
+                        ),
+                ),
+              ),
             );
           },
         );
@@ -3257,200 +3776,250 @@ class _FloatingFetusViewerState extends State<_FloatingFetusViewer>
   }
 }
 
-class _FetusCircleBorderPainter extends CustomPainter {
-  const _FetusCircleBorderPainter();
+class WaveMonitorWidget extends StatefulWidget {
+  const WaveMonitorWidget({
+    super.key,
+    required this.connected,
+    required this.userMoving,
+    required this.movementActive,
+  });
+
+  final bool connected;
+  final bool userMoving;
+  final bool movementActive;
 
   @override
-  void paint(Canvas canvas, Size size) {
-    final center = Offset(size.width / 2, size.height / 2);
-    final radius = math.min(size.width, size.height) * .39;
-    canvas.drawCircle(
-      center,
-      radius,
-      Paint()
-        ..color = const Color(0xFFC97C72).withValues(alpha: .75)
-        ..style = PaintingStyle.stroke
-        ..strokeWidth = 4,
-    );
+  State<WaveMonitorWidget> createState() => _WaveMonitorWidgetState();
+}
+
+class _WaveMonitorWidgetState extends State<WaveMonitorWidget>
+    with SingleTickerProviderStateMixin {
+  late final AnimationController _controller = AnimationController(
+    vsync: this,
+    duration: const Duration(seconds: 3),
+  )..repeat();
+
+  @override
+  void dispose() {
+    _controller.dispose();
+    super.dispose();
+  }
+
+  String get _statusText {
+    if (widget.movementActive) return '태동 감지 중';
+    if (widget.userMoving) return '센서 흔들리는 중';
+    if (widget.connected) return '기기 작동 중';
+    return '기기 전원 꺼짐';
+  }
+
+  Color get _statusColor {
+    if (widget.movementActive) return const Color(0xFFFFA279);
+    if (widget.userMoving) return const Color(0xFFFF461D);
+    if (widget.connected) return const Color(0xFF00C96B);
+    return AppColors.muted;
   }
 
   @override
-  bool shouldRepaint(covariant CustomPainter oldDelegate) => false;
+  Widget build(BuildContext context) => Center(
+    child: SizedBox(
+      width: 280,
+      height: 318,
+      child: Stack(
+        alignment: Alignment.topCenter,
+        clipBehavior: Clip.none,
+        children: [
+          SizedBox.square(
+            dimension: 280,
+            child: AnimatedBuilder(
+              animation: _controller,
+              builder: (context, _) => CustomPaint(
+                painter: _WaveMonitorPainter(
+                  phase: _controller.value,
+                  connected: widget.connected,
+                  userMoving: widget.userMoving,
+                  movementActive: widget.movementActive,
+                ),
+                child: const SizedBox.expand(),
+              ),
+            ),
+          ),
+          Positioned(
+            left: 0,
+            right: 0,
+            bottom: 0,
+            child: AnimatedBuilder(
+              animation: _controller,
+              builder: (context, child) => Transform.translate(
+                offset: Offset(
+                  widget.userMoving
+                      ? math.sin(_controller.value * math.pi * 18) * 4
+                      : 0,
+                  0,
+                ),
+                child: child,
+              ),
+              child: Text(
+                _statusText,
+                textAlign: TextAlign.center,
+                style: Theme.of(context).textTheme.titleSmall?.copyWith(
+                  color: _statusColor,
+                  fontWeight: FontWeight.w900,
+                ),
+              ),
+            ),
+          ),
+        ],
+      ),
+    ),
+  );
 }
 
-class _FetusCirclePainter extends CustomPainter {
-  const _FetusCirclePainter();
-  @override
-  void paint(Canvas canvas, Size size) {
-    canvas.drawRect(Offset.zero & size, Paint()..color = AppColors.peach);
-    final center = Offset(size.width / 2, size.height / 2);
-    final radius = math.min(size.width, size.height) * .39;
-    canvas.drawCircle(
-      center,
-      radius,
-      Paint()..color = Colors.white.withValues(alpha: .46),
-    );
-  }
-
-  @override
-  bool shouldRepaint(covariant CustomPainter oldDelegate) => false;
-}
-
-class _MonitoringAssetWave extends StatelessWidget {
-  const _MonitoringAssetWave({
+class _WaveMonitorPainter extends CustomPainter {
+  const _WaveMonitorPainter({
     required this.phase,
-    required this.active,
+    required this.connected,
     required this.userMoving,
     required this.movementActive,
   });
 
   final double phase;
-  final bool active;
+  final bool connected;
   final bool userMoving;
   final bool movementActive;
 
-  static const _stain = 'assets/images/monitoring/stain.png';
-  static const _circle = 'assets/images/monitoring/circle.png';
-  static const _outside = 'assets/images/monitoring/outside.png';
-  static const _inside = 'assets/images/monitoring/inside.png';
-
   @override
-  Widget build(BuildContext context) {
-    final text = movementActive
-        ? '태동 감지됨'
-        : (userMoving ? '센서가 흔들리는 중' : '태동 감지 중');
-    final color = movementActive
-        ? AppColors.mint
-        : (userMoving
-              ? AppColors.coralDark
-              : (active ? AppColors.coralDark : AppColors.muted));
-    return Center(
-      child: SizedBox(
-        width: 238,
-        height: 238,
-        child: Stack(
-          alignment: Alignment.center,
-          children: [
-            Positioned.fill(
-              child: Image.asset(_stain, fit: BoxFit.contain),
-            ),
-            Positioned.fill(
-              child: Image.asset(_circle, fit: BoxFit.contain),
-            ),
-            SizedBox(
-              width: 218,
-              height: 218,
-              child: ClipOval(
-                child: Stack(
-                  children: [
-                    Positioned(
-                      left: 0,
-                      right: 0,
-                      top: 76,
-                      height: 74,
-                      child: _MovingWaveStrip(
-                        asset: _outside,
-                        phase: phase,
-                        opacity: active ? .72 : .26,
-                        reverse: false,
-                      ),
-                    ),
-                    Positioned(
-                      left: 0,
-                      right: 0,
-                      top: 76,
-                      height: 74,
-                      child: _MovingWaveStrip(
-                        asset: _inside,
-                        phase: phase,
-                        opacity: active ? 1 : .38,
-                        reverse: true,
-                        speedMultiplier: .62,
-                      ),
-                    ),
-                  ],
-                ),
-              ),
-            ),
-            Transform.translate(
-              offset: Offset(
-                userMoving ? math.sin(phase * math.pi * 20) * 4 : 0,
-                4,
-              ),
-              child: AnimatedOpacity(
-                duration: const Duration(milliseconds: 180),
-                opacity: active ? .92 : .68,
-                child: Text(
-                  text,
-                  style: Theme.of(context).textTheme.titleSmall?.copyWith(
-                    color: color,
-                    fontWeight: FontWeight.w900,
-                  ),
-                ),
-              ),
-            ),
+  void paint(Canvas canvas, Size size) {
+    final center = Offset(size.width / 2, size.height / 2);
+    final radius = math.min(size.width, size.height) / 2 - 6;
+    final circlePath = Path()
+      ..addOval(Rect.fromCircle(center: center, radius: radius));
+
+    canvas.save();
+    canvas.clipPath(circlePath);
+
+    final power = movementActive
+        ? 1.0
+        : userMoving
+        ? .72
+        : connected
+        ? .62
+        : .24;
+    final amplitude = 9 + 28 * power;
+    final baseline = center.dy + radius * .12;
+    final wavelength = size.width / 2.35;
+    final horizontalShift = phase * wavelength;
+    final points = <Offset>[];
+    for (var x = -wavelength * 2; x <= size.width + wavelength * 2; x += 5) {
+      final primary = math.sin(((x + horizontalShift) / wavelength) * math.pi * 2);
+      final secondary = math.sin(((x + horizontalShift * .7) / wavelength) * math.pi * 4);
+      points.add(
+        Offset(
+          x,
+          baseline + primary * amplitude + secondary * amplitude * .10,
+        ),
+      );
+    }
+
+    final wavePath = _smoothPathForPoints(points);
+    final fillPath = Path.from(wavePath)
+      ..lineTo(size.width + wavelength * 2, size.height)
+      ..lineTo(-wavelength * 2, size.height)
+      ..close();
+
+    canvas.drawPath(
+      fillPath,
+      Paint()
+        ..shader = ui.Gradient.linear(
+          Offset(0, baseline - amplitude),
+          Offset(0, size.height),
+          [
+            const Color(0xFFFFD7C6).withValues(alpha: .62),
+            const Color(0xFFFFD7C6).withValues(alpha: .30),
+            const Color(0xFFFFD7C6).withValues(alpha: 0),
           ],
         ),
-      ),
+    );
+    canvas.drawPath(
+      wavePath,
+      Paint()
+        ..color = AppColors.coral.withValues(alpha: connected ? .92 : .70)
+        ..style = PaintingStyle.stroke
+        ..strokeWidth = 4
+        ..strokeCap = StrokeCap.round,
+    );
+    canvas.restore();
+
+    canvas.drawCircle(
+      center,
+      radius,
+      Paint()
+        ..color = const Color(0xFFFFCDBD).withValues(alpha: .86)
+        ..style = PaintingStyle.stroke
+        ..strokeWidth = 5,
     );
   }
-}
-
-class _MovingWaveStrip extends StatelessWidget {
-  const _MovingWaveStrip({
-    required this.asset,
-    required this.phase,
-    required this.opacity,
-    required this.reverse,
-    this.speedMultiplier = 1,
-  });
-
-  final String asset;
-  final double phase;
-  final double opacity;
-  final bool reverse;
-  final double speedMultiplier;
 
   @override
-  Widget build(BuildContext context) {
-    const tileWidth = 218.0;
-    final shiftedPhase = (phase * speedMultiplier) % 1.0;
-    final offset = (reverse ? shiftedPhase : -shiftedPhase) * tileWidth;
-    return Opacity(
-      opacity: opacity,
-      child: ClipRect(
-        child: OverflowBox(
-          alignment: Alignment.centerLeft,
-          minWidth: 0,
-          maxWidth: tileWidth * 4,
-          child: Transform.translate(
-            offset: Offset(offset - tileWidth, 0),
-            child: Row(
-              mainAxisSize: MainAxisSize.min,
-              children: List.generate(
-                4,
-                (_) => SizedBox(
-                  width: tileWidth,
-                  height: 74,
-                  child: Image.asset(asset, fit: BoxFit.fill),
-                ),
-              ),
-            ),
-          ),
-        ),
-      ),
-    );
-  }
+  bool shouldRepaint(covariant _WaveMonitorPainter oldDelegate) =>
+      oldDelegate.phase != phase ||
+      oldDelegate.connected != connected ||
+      oldDelegate.userMoving != userMoving ||
+      oldDelegate.movementActive != movementActive;
 }
 
 enum _ChartMode { bar, line, dailyDots, dailyBars }
 
 enum _ChartValueFormat { number, duration }
 
+Path _smoothPathForPoints(List<Offset> points) {
+  final path = Path();
+  if (points.isEmpty) return path;
+  path.moveTo(points.first.dx, points.first.dy);
+  if (points.length == 1) return path;
+  for (var i = 0; i < points.length - 1; i++) {
+    final p0 = i == 0 ? points[i] : points[i - 1];
+    final p1 = points[i];
+    final p2 = points[i + 1];
+    final p3 = i + 2 < points.length ? points[i + 2] : p2;
+    final control1 = Offset(
+      p1.dx + (p2.dx - p0.dx) * .32,
+      (p1.dy + (p2.dy - p0.dy) * .32).clamp(
+        math.min(p1.dy, p2.dy),
+        math.max(p1.dy, p2.dy),
+      ),
+    );
+    final control2 = Offset(
+      p2.dx - (p3.dx - p1.dx) * .32,
+      (p2.dy - (p3.dy - p1.dy) * .32).clamp(
+        math.min(p1.dy, p2.dy),
+        math.max(p1.dy, p2.dy),
+      ),
+    );
+    path.cubicTo(
+      control1.dx,
+      control1.dy,
+      control2.dx,
+      control2.dy,
+      p2.dx,
+      p2.dy,
+    );
+  }
+  return path;
+}
+
 class _ReportMoment {
-  const _ReportMoment({required this.hour, required this.value});
+  const _ReportMoment({
+    required this.hour,
+    required this.value,
+    this.measuredAt,
+    this.intensity,
+    this.measuredDuringUserMotion = false,
+  });
   final double hour;
   final double value;
+  final DateTime? measuredAt;
+  final int? intensity;
+  final bool measuredDuringUserMotion;
 }
 
 class _ReportPair {
@@ -3549,33 +4118,48 @@ class _LineChartPainter extends CustomPainter {
             topInset + height - height * values[i]!,
           ),
     ];
-    final path = Path();
-    var pathStarted = false;
+    final segments = <List<Offset>>[];
+    var currentSegment = <Offset>[];
     for (var pointIndex = 0; pointIndex < points.length; pointIndex++) {
       final point = points[pointIndex];
       final valueIndex = visibleIndexes[pointIndex];
-      if (point == null) {
-        pathStarted = false;
+      if (point == null || (!monthlyDynamic && missingIndexes.contains(valueIndex))) {
+        if (currentSegment.isNotEmpty) {
+          segments.add(currentSegment);
+          currentSegment = <Offset>[];
+        }
         continue;
       }
-      if (missingIndexes.contains(valueIndex)) {
-        continue;
-      }
-      if (!pathStarted) {
-        path.moveTo(point.dx, point.dy);
-        pathStarted = true;
-      } else {
-        path.lineTo(point.dx, point.dy);
-      }
+      currentSegment.add(point);
     }
-    canvas.drawPath(
-      path,
-      Paint()
-        ..color = AppColors.coral
-        ..style = PaintingStyle.stroke
-        ..strokeWidth = 3
-        ..strokeCap = StrokeCap.round,
-    );
+    if (currentSegment.isNotEmpty) segments.add(currentSegment);
+    for (final segment in segments) {
+      final path = _smoothPathForPoints(segment);
+      final fillPath = Path.from(path)
+        ..lineTo(segment.last.dx, topInset + height)
+        ..lineTo(segment.first.dx, topInset + height)
+        ..close();
+      canvas.drawPath(
+        fillPath,
+        Paint()
+          ..shader = ui.Gradient.linear(
+            Offset(0, topInset),
+            Offset(0, topInset + height),
+            [
+              AppColors.coral.withValues(alpha: .28),
+              AppColors.coral.withValues(alpha: 0),
+            ],
+          ),
+      );
+      canvas.drawPath(
+        path,
+        Paint()
+          ..color = AppColors.coral
+          ..style = PaintingStyle.stroke
+          ..strokeWidth = 4
+          ..strokeCap = StrokeCap.round,
+      );
+    }
     for (var pointIndex = 0; pointIndex < points.length; pointIndex++) {
       final point = points[pointIndex];
       final valueIndex = visibleIndexes[pointIndex];
@@ -3594,8 +4178,8 @@ class _LineChartPainter extends CustomPainter {
       final pointColor = valueIndex == highlightIndex
           ? AppColors.mint
           : AppColors.coral;
-      canvas.drawCircle(point, 4, Paint()..color = Colors.white);
-      canvas.drawCircle(point, 2.5, Paint()..color = pointColor);
+      canvas.drawCircle(point, 5.2, Paint()..color = Colors.white);
+      canvas.drawCircle(point, 3.4, Paint()..color = pointColor);
       _drawChartValue(
         canvas,
         point.translate(0, -18),
@@ -3622,6 +4206,8 @@ class _LineChartPainter extends CustomPainter {
       oldDelegate.axisScale != axisScale ||
       oldDelegate.highlightIndex != highlightIndex ||
       oldDelegate.topInset != topInset ||
+      oldDelegate.missingIndexes != missingIndexes ||
+      oldDelegate.monthlyDynamic != monthlyDynamic ||
       oldDelegate.valueFormat != valueFormat;
 }
 
@@ -3650,27 +4236,40 @@ class _RoundedBarChartPainter extends CustomPainter {
     }
     final gap = size.width / values.length;
     for (var i = 0; i < values.length; i++) {
-      final width = gap * .5;
+      final width = math.min(26.0, gap * .42);
       final centerX = _chartX(size, i, values.length, xPositions);
       final x = (centerX - width / 2).clamp(0, size.width - width).toDouble();
       final value = values[i];
       final isMissing = value == null;
       final barHeight = height * (value ?? .12);
-      final rect = RRect.fromRectAndRadius(
-        Rect.fromLTWH(x, topInset + height - barHeight, width, barHeight),
-        Radius.circular(width / 2),
-      );
-      canvas.drawRRect(
-        rect,
-        Paint()
-          ..color = isMissing
-              ? AppColors.softGray.withValues(alpha: .35)
-              : i == highlightIndex
-              ? AppColors.mint
-              : i == 3 && highlightIndex == null
-              ? AppColors.coral
-              : AppColors.softGray,
-      );
+      final rect = isMissing
+          ? RRect.fromRectAndRadius(
+              Rect.fromCenter(
+                center: Offset(centerX, topInset + height),
+                width: math.max(24, width),
+                height: 10,
+              ),
+              const Radius.circular(99),
+            )
+          : RRect.fromRectAndRadius(
+              Rect.fromLTWH(x, topInset + height - barHeight, width, barHeight),
+              Radius.circular(width / 2),
+            );
+      final isHighlighted =
+          i == highlightIndex || (i == 3 && highlightIndex == null);
+      final paint = Paint();
+      if (isMissing) {
+        paint.color = AppColors.softGray.withValues(alpha: .52);
+      } else if (isHighlighted) {
+        paint.shader = ui.Gradient.linear(
+          Offset(0, rect.top),
+          Offset(0, rect.bottom),
+          [AppColors.mint, AppColors.mint.withValues(alpha: .58)],
+        );
+      } else {
+        paint.color = AppColors.controlGray;
+      }
+      canvas.drawRRect(rect, paint);
       _drawChartValue(
         canvas,
         Offset(x + width / 2, topInset + height - barHeight - 12),
@@ -3697,7 +4296,7 @@ class _DailyDotChartPainter extends CustomPainter {
   @override
   void paint(Canvas canvas, Size size) {
     final height = size.height - 28;
-    final baselineY = height * .54;
+    final baselineY = height * .66;
     _drawTimeAxis(
       canvas,
       size,
@@ -3711,17 +4310,17 @@ class _DailyDotChartPainter extends CustomPainter {
       final bucket = (minute / bucketMinutes).floor() * bucketMinutes;
       grouped.putIfAbsent(bucket, () => []).add(point);
     }
-    for (final entry in grouped.entries) {
+    final entries = grouped.entries.toList()
+      ..sort((a, b) => a.key.compareTo(b.key));
+    for (final entry in entries) {
       final group = entry.value;
-      final hour =
-          group.fold<double>(0, (sum, point) => sum + point.hour) /
-          group.length;
+      final hour = entry.key / 60;
       final intensity =
           group.fold<double>(0, (sum, point) => sum + point.value) /
           group.length;
       final x = (hour / 24).clamp(0.0, 1.0) * size.width;
-      final outerRadius = 4.5 + intensity.clamp(0.0, 1.0) * 5;
-      final innerRadius = math.max(2.8, outerRadius - 2.1);
+      final outerRadius = 4.5 + intensity.clamp(0.0, 1.0) * 3;
+      final innerRadius = math.max(3.2, outerRadius - 2.1);
       canvas.drawCircle(
         Offset(x, baselineY),
         outerRadius,
@@ -3732,13 +4331,11 @@ class _DailyDotChartPainter extends CustomPainter {
         innerRadius,
         Paint()..color = AppColors.coral,
       );
-      if (group.length > 1) {
-        _drawTinyLabel(
-          canvas,
-          Offset(x, baselineY - outerRadius - 8),
-          '${group.length}',
-        );
-      }
+      _drawTinyLabel(
+        canvas,
+        Offset(x, baselineY - outerRadius - 8),
+        '${group.length}',
+      );
     }
     _drawLabels(
       canvas,
@@ -3750,7 +4347,7 @@ class _DailyDotChartPainter extends CustomPainter {
 
   @override
   bool shouldRepaint(covariant _DailyDotChartPainter oldDelegate) =>
-      oldDelegate.points != points;
+      oldDelegate.points != points || oldDelegate.axisScale != axisScale;
 }
 
 class _DailyBarChartPainter extends CustomPainter {
@@ -3794,7 +4391,15 @@ class _DailyBarChartPainter extends CustomPainter {
         ),
         Radius.circular(barWidth / 2),
       );
-      canvas.drawRRect(rect, Paint()..color = AppColors.coral);
+      canvas.drawRRect(
+        rect,
+        Paint()
+          ..shader = ui.Gradient.linear(
+            Offset(0, rect.top),
+            Offset(0, rect.bottom),
+            [AppColors.coral, AppColors.peach],
+          ),
+      );
     }
     _drawLabels(
       canvas,
@@ -3954,7 +4559,7 @@ void _drawTimeAxis(
     Offset(0, y),
     Offset(size.width, y),
     Paint()
-      ..color = AppColors.softGray
+      ..color = AppColors.softGray.withValues(alpha: .82)
       ..strokeWidth = 2,
   );
   for (var hour = 0.0; hour <= 24.0001; hour += intervalHours) {
@@ -4045,7 +4650,10 @@ _InterpolatedValues _interpolateMissingValues(List<double?> values) {
     while (next < values.length && values[next] == null) {
       next++;
     }
-    if (previous >= 0 && next < values.length) {
+    if (previous < 0 && next < values.length) {
+      result[i] = 0;
+      missing.add(i);
+    } else if (previous >= 0 && next < values.length) {
       final start = values[previous]!;
       final end = values[next]!;
       final ratio = (i - previous) / (next - previous);
@@ -4120,10 +4728,15 @@ void _drawLabels(
   for (var i = 0; i < labels.length; i++) {
     final x = _chartX(size, i, labels.length, xPositions);
     final isEdge = i == 0 || i == labels.length - 1;
-    if (!isEdge && x - lastPaintedX < 28) continue;
+    if (!isEdge && x - lastPaintedX < 34) continue;
     painter.text = TextSpan(
       text: labels[i],
-      style: const TextStyle(color: AppColors.muted, fontSize: 9, height: 1.1),
+      style: const TextStyle(
+        color: AppColors.muted,
+        fontSize: 11,
+        height: 1.16,
+        fontWeight: FontWeight.w600,
+      ),
     );
     painter.layout();
     painter.paint(
@@ -4158,23 +4771,12 @@ void _drawChartValue(Canvas canvas, Offset offset, String text) {
       text: text,
       style: const TextStyle(
         color: AppColors.ink,
-        fontSize: 9,
+        fontSize: 11,
         fontWeight: FontWeight.w800,
       ),
     ),
     textDirection: TextDirection.ltr,
   )..layout();
-  canvas.drawRRect(
-    RRect.fromRectAndRadius(
-      Rect.fromCenter(
-        center: offset,
-        width: painter.width + 10,
-        height: painter.height + 5,
-      ),
-      const Radius.circular(99),
-    ),
-    Paint()..color = Colors.white.withValues(alpha: .92),
-  );
   painter.paint(
     canvas,
     Offset(offset.dx - painter.width / 2, offset.dy - painter.height / 2),
@@ -4192,10 +4794,12 @@ void _drawMissingMarker(
 }) {
   final x = _chartX(size, index, count, xPositions);
   final markerY = topInset + height;
-  canvas.drawCircle(
-    Offset(x, markerY),
-    4,
-    Paint()..color = AppColors.softGray.withValues(alpha: .55),
+  canvas.drawRRect(
+    RRect.fromRectAndRadius(
+      Rect.fromCenter(center: Offset(x, markerY), width: 26, height: 10),
+      const Radius.circular(99),
+    ),
+    Paint()..color = AppColors.softGray.withValues(alpha: .48),
   );
   _drawChartValue(canvas, Offset(x, markerY - 18), '-');
 }
@@ -4219,6 +4823,17 @@ DateTime _dateOnly(DateTime date) => DateTime(date.year, date.month, date.day);
 
 String _formatDate(DateTime date) =>
     '${date.month.toString().padLeft(2, '0')}.${date.day.toString().padLeft(2, '0')}';
+
+String _formatClock(DateTime? value) {
+  if (value == null) return '--:--:--';
+  return '${value.hour.toString().padLeft(2, '0')}:${value.minute.toString().padLeft(2, '0')}:${value.second.toString().padLeft(2, '0')}';
+}
+
+String _intensityLabel(int intensity) {
+  if (intensity >= 3400) return '강';
+  if (intensity >= 2700) return '중';
+  return '약';
+}
 
 List<double> _evenPositions(int count) => [
   for (var i = 0; i < count; i++) count == 1 ? .5 : i / (count - 1),
@@ -4823,21 +5438,22 @@ class _CropGuidePainter extends CustomPainter {
       oldDelegate.showInnerOrbit != showInnerOrbit;
 }
 
-void _showAlerts(BuildContext context) {
-  final alerts = <({String time, String message})>[
-    (time: '오후 02:32', message: '태동이 감지되었어요. 오늘의 기록에 저장했어요.'),
-    (time: '오후 01:18', message: '실시간 모니터링 세션을 시작했습니다.'),
-    (time: '오전 11:40', message: '오늘 태동 흐름이 정상 범위입니다.'),
-  ];
-
+void _showAlerts(
+  BuildContext context, {
+  required List<_MovementAlertEntry> alerts,
+  required ValueChanged<_MovementAlertEntry> onDelete,
+  required VoidCallback onClear,
+}) {
   showDialog<void>(
     context: context,
+    barrierDismissible: true,
     builder: (context) => StatefulBuilder(
       builder: (context, setDialogState) => Dialog(
+        backgroundColor: Colors.white,
         insetPadding: const EdgeInsets.symmetric(horizontal: 24, vertical: 32),
         shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(22)),
         child: ConstrainedBox(
-          constraints: const BoxConstraints(maxWidth: 420),
+          constraints: const BoxConstraints(maxWidth: 420, maxHeight: 560),
           child: Padding(
             padding: const EdgeInsets.fromLTRB(18, 14, 14, 18),
             child: Column(
@@ -4852,10 +5468,14 @@ void _showAlerts(BuildContext context) {
                         style: Theme.of(context).textTheme.titleMedium,
                       ),
                     ),
-                    IconButton(
-                      tooltip: '닫기',
-                      onPressed: () => Navigator.pop(context),
-                      icon: const Icon(Icons.close_rounded),
+                    TextButton(
+                      onPressed: alerts.isEmpty
+                          ? null
+                          : () {
+                              onClear();
+                              setDialogState(() {});
+                            },
+                      child: const Text('모두 지우기'),
                     ),
                   ],
                 ),
@@ -4878,15 +5498,23 @@ void _showAlerts(BuildContext context) {
                       itemBuilder: (context, index) {
                         final alert = alerts[index];
                         return _AlertRow(
-                          time: alert.time,
+                          time: _formatAlertTime(alert.createdAt),
                           message: alert.message,
-                          onDelete: () => setDialogState(
-                            () => alerts.removeAt(index),
-                          ),
+                          onDelete: () {
+                            onDelete(alert);
+                            setDialogState(() {});
+                          },
                         );
                       },
                     ),
                   ),
+                Align(
+                  alignment: Alignment.centerRight,
+                  child: TextButton(
+                    onPressed: () => Navigator.pop(context),
+                    child: const Text('닫기'),
+                  ),
+                ),
               ],
             ),
           ),
@@ -4894,6 +5522,12 @@ void _showAlerts(BuildContext context) {
       ),
     ),
   );
+}
+
+String _formatAlertTime(DateTime value) {
+  final hour = value.hour.toString().padLeft(2, '0');
+  final minute = value.minute.toString().padLeft(2, '0');
+  return '$hour:$minute';
 }
 
 class _AlertRow extends StatelessWidget {

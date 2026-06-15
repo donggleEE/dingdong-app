@@ -1,3 +1,268 @@
+﻿## 2026-06-15 23:34:37 +09:00
+
+### 사용자 요청
+
+실시간 모니터링 화면의 기존 원형 애니메이션 구현을 폐기하고, 외부 PNG, GIF, 영상 없이 Flutter 코드만으로 `WaveMonitorWidget`을 새로 만들어 달라고 요청했다. 사각형 배경이나 단색 원은 제거하고, 원형 테두리, 원 안의 움직이는 물결선, 물결 아래 피치 그라데이션만 보이도록 구현해 달라고 요청했다.
+
+### Codex가 실행한 명령어
+
+- `Get-Content -Encoding UTF8 lib\main.dart`
+- `dart analyze`
+- `dart format lib\main.dart`
+- `Get-Date -Format "yyyy-MM-dd HH:mm:ss K"`
+
+### 생성된 파일
+
+- 없음
+
+### 수정된 파일
+
+- `lib/main.dart`
+- `CODEX_LOG.md`
+
+### 결과 요약
+
+기존 `_MonitoringAssetWave`와 디버그용 painter 구현을 제거하고, 자체 `AnimationController`를 가진 `WaveMonitorWidget`과 `_WaveMonitorPainter`를 새로 추가했다. 원형 영역은 `SizedBox.square(dimension: 280)`로 고정하고, 원 밖은 투명하게 유지하며, `canvas.clipPath(circlePath)` 안에서 물결선과 물결 아래 피치 그라데이션만 렌더링하도록 했다. 상태 우선순위는 태동 감지, 센서 흔들림, 기기 작동, 전원 꺼짐 순서로 유지하고, 연결 여부에 따라 진폭만 달라지도록 구현했다. `dart analyze`는 통과했고, `dart format lib\main.dart`는 제한 시간 안에 완료되지 않았다.
+
+---
+
+## 2026-06-15 23:18:00 +09:00
+
+### 사용자 요청
+
+실시간 모니터링 화면에서 원형 애니메이션이 아예 보이지 않는 문제의 원인을 찾기 위해 렌더링 디버깅을 단계적으로 수행해 달라고 요청했다. 원형 애니메이션 위젯이 build tree에 포함되는지, `CustomPaint` 크기가 0인지, `paint()`가 호출되는지 확인하기 위한 `debugPrint`를 추가하고, 임시로 연피치 원 배경, 진한 주황 테두리, 초록 굵은 물결선이 강제로 보이도록 수정해 달라고 요청했다.
+
+### Codex가 실행한 명령어
+
+- `Get-Content -Encoding UTF8 lib\main.dart`
+- `dart analyze`
+- `dart format lib\main.dart`
+- `Get-Date -Format "yyyy-MM-dd HH:mm:ss K"`
+
+### 생성된 파일
+
+- 없음
+
+### 수정된 파일
+
+- `lib/main.dart`
+- `CODEX_LOG.md`
+
+### 결과 요약
+
+모니터링 애니메이션 부모 영역과 원형 위젯에 `LayoutBuilder` 기반 `debugPrint`를 추가해 constraints, animation controller 상태, phase, active 상태를 출력하도록 했다. `_MonitoringAssetWave`는 `SizedBox(width: 280, height: 318)`와 `SizedBox.square(280)`를 사용해 고정 크기로 렌더링되게 정리했고, `Stack`의 clip을 끄고 텍스트 opacity를 1로 고정했다. `_MonitoringWavePainter.paint()`에도 호출 로그를 추가했으며, 디버깅을 위해 빨간 사각형 배경, 연피치 원, 초록 굵은 물결선, 진한 주황 테두리를 강제로 그리도록 바꿨다. `dart analyze`는 통과했고, `dart format lib\main.dart`는 제한 시간 안에 완료되지 않았다.
+
+---
+
+## 2026-06-15 23:05:30 +09:00
+
+### 사용자 요청
+
+실시간 모니터링 화면에서 원형 테두리만 보이고 내부 물결선과 피치색 그라데이션 영역이 렌더링되지 않는 문제를 수정해 달라고 요청했다. `CustomPaint` 크기를 명확히 지정하고, 원 내부 클리핑, fill path, wave stroke, 원형 테두리 draw 순서로 항상 물결 애니메이션이 보이게 해 달라고 요청했다. 리포트 화면의 `< 날짜 >` 날짜 변경 텍스트와 버튼 크기는 현재의 0.7배로 줄여 달라고 요청했다.
+
+### Codex가 실행한 명령어
+
+- `Get-Content -Encoding UTF8 lib\main.dart`
+- `dart analyze`
+- `dart format lib\main.dart`
+- `Get-Date -Format "yyyy-MM-dd HH:mm:ss K"`
+
+### 생성된 파일
+
+- 없음
+
+### 수정된 파일
+
+- `lib/main.dart`
+- `CODEX_LOG.md`
+
+### 결과 요약
+
+모니터링 원형 애니메이션의 `CustomPaint`를 `SizedBox(width: 280, height: 280)`로 고정하고, painter 내부에서 원 배경, 원형 clip, 피치색 그라데이션 fill, wave stroke, 마지막 원형 테두리를 직접 그리도록 수정했다. 미연결 상태에서도 최소 진폭과 불투명한 색상이 유지되게 해 원 내부 물결이 비어 보이지 않도록 했다. `shouldRepaint`는 항상 다시 그리도록 바꿔 animation value 변화가 즉시 반영되게 했다. 리포트 날짜 이동 영역의 화살표와 날짜 텍스트 크기는 약 0.7배로 축소했다. `dart analyze`는 통과했고, `dart format lib\main.dart`는 제한 시간 안에 완료되지 않았다.
+
+---
+
+## 2026-06-15 22:54:02 +09:00
+
+### 사용자 요청
+
+실시간 모니터링 화면의 진동 영상을 외부 영상, PNG, GIF 에셋 없이 Flutter 코드로 직접 구현하고, 애니메이션 영역이 비거나 사라지지 않도록 원형 안에 항상 보이는 파도 애니메이션을 `CustomPainter`와 `AnimationController`로 렌더링해 달라고 요청했다. 웹소켓 연결 여부, 자이로 흔들림, 압전센서 태동 감지 상태에 따른 문구와 색상, 우선순위도 유지해 달라고 요청했다.
+
+### Codex가 실행한 명령어
+
+- `Get-Content -Encoding UTF8 lib\main.dart`
+- `dart analyze`
+- `dart format lib\main.dart`
+- `Get-Date -Format "yyyy-MM-dd HH:mm:ss K"`
+
+### 생성된 파일
+
+- 없음
+
+### 수정된 파일
+
+- `lib/main.dart`
+- `CODEX_LOG.md`
+
+### 결과 요약
+
+모니터링 원형 애니메이션을 `SizedBox.square`, `ClipOval`, `CustomPaint(child: SizedBox.expand())` 구조로 변경해 0 높이로 사라지지 않고 항상 렌더링되도록 수정했다. 물결은 Canvas에서 직접 그리고, 아래 영역은 피치색 그라데이션으로 채우며, 원형 테두리는 별도 원형 border로 유지했다. 활성 상태는 실제 웹소켓 연결 여부인 `_sensorSocket != null`을 기준으로 넘겨 웹소켓 연결 시 큰 진폭과 `기기 작동 중` 문구가 나오도록 조정했다. `dart analyze`는 통과했고, `dart format lib\main.dart`는 제한 시간 안에 완료되지 않았다.
+
+---
+
+## 2026-06-15 22:39:18 +09:00
+
+### 사용자 요청
+
+모든 그래프의 변곡점 곡선을 더 부드럽게 만들고, 홈 화면 실사 태아 이미지만 카드 왼쪽 면에 붙도록 수정해 달라고 요청했다. 모니터링 화면의 원형 물결 애니메이션과 상태 문구 조건을 유지해 달라고 요청했으며, 월간 리포트 그래프는 이전 데이터가 없어도 0에서 올라오는 것처럼 선을 그리되 결측값 표시는 `-`로 유지해 달라고 요청했다.
+
+### Codex가 실행한 명령어
+
+- `Get-Content -Encoding UTF8 lib\main.dart`
+- `Select-String -Path lib\main.dart -Pattern "_interpolateMissingValues|_monthlyVisibleIndexes" -Context 0,60`
+- `dart analyze`
+- `dart format lib\main.dart`
+- `Get-Date -Format "yyyy-MM-dd HH:mm:ss K"`
+
+### 생성된 파일
+
+- 없음
+
+### 수정된 파일
+
+- `lib/main.dart`
+- `CODEX_LOG.md`
+
+### 결과 요약
+
+공통 smooth path 제어 강도를 높여 그래프 변곡점이 더 둥글게 이어지도록 조정했다. 홈 화면 실사 태아 이미지는 추상 이미지와 별도 분기하여 카드 왼쪽에 맞닿도록 왼쪽 정렬과 왼쪽 기준 스케일을 적용했다. 월간 리포트 결측값은 화면상 `-`로 표시하되 선 그래프는 선행 결측 구간을 0 기준점으로 사용해 첫 실제 데이터까지 자연스럽게 올라오도록 변경했다. `dart analyze`는 통과했고, `dart format lib\main.dart`는 제한 시간 안에 완료되지 않았다.
+
+---
+
+## 2026-06-15 22:12:34 +09:00
+
+### 사용자 요청
+
+모든 그래프 곡선을 더 부드럽게 하고, 홈 화면 실사 태아 크기와 알림 버튼 배경, 태동 감지 카운트 박스 여백 및 굵기를 조정해 달라고 요청했다. 모니터링 화면은 원형 물결 애니메이션 상태 문구를 새 기준으로 바꾸고 상태 박스 위 알림 문구를 제거해 달라고 요청했다. 리포트 화면은 업로드/달력 버튼 배경, 그래프 제목 굵기, 일간 태동 횟수 그래프 형태, 월간 그래프 곡선 스타일을 조정해 달라고 요청했다.
+
+### Codex가 실행한 명령어
+
+- `Select-String -Path lib\main.dart -Pattern "_smoothPathForPoints|_FloatingFetusViewer|_TodayHeroCard|_MovementFlowCard|_MonitoringAssetWave|_MonitoringWavePainter|_recordMessage|_ReportCircleIconButton|_ReportChartCardState|_DailyDotChartPainter|_buildMonthlyReport" -Context 2,10`
+- `Get-Content -Encoding UTF8 lib\main.dart`
+- `dart analyze`
+- `dart format lib\main.dart`
+- `Get-Date -Format "yyyy-MM-dd HH:mm:ss K"`
+
+### 생성된 파일
+
+- 없음
+
+### 수정된 파일
+
+- `lib/main.dart`
+- `CODEX_LOG.md`
+
+### 결과 요약
+
+공통 곡선 보간 강도를 높여 홈과 리포트 선 그래프가 더 부드럽게 이어지도록 조정했다. 홈 화면의 실사 태아 이미지는 작게 줄이고, 알림 버튼 배경은 흰색으로 변경했으며, 태동 감지 카운트 박스는 여백을 줄이고 숫자만 굵게 표시되도록 수정했다. 최근 태동 흐름 카드 헤더는 더 상단에 가깝게 배치했다. 모니터링 화면은 원형 애니메이션 아래 상태 문구를 `기기 작동 중`, `기기 전원 꺼짐`, `센서 흔들리는 중`, `태동 감지 중` 기준으로 표시하고 상태 박스 위 알림 문구를 제거했다. 리포트 화면은 업로드/달력 버튼 배경을 흰색으로 바꾸고 그래프 제목 굵기를 낮췄으며, 일간 태동 횟수 그래프를 시간축 위 점 방식으로 변경했다. `dart analyze`는 통과했고, `dart format lib\main.dart`는 제한 시간 안에 완료되지 않았다.
+
+---
+
+## 2026-06-15 20:45:44 +09:00
+
+### 사용자 요청
+
+홈 화면 알림 아이콘을 연한 원형 배경이 있는 형태로 수정하고, 모니터링 화면의 원형 파도 애니메이션을 PNG가 아닌 코드 기반 `CustomPainter`로 구현해 달라고 요청했다. 태동 기록 저장 강도 선택 후 선택지가 닫히도록 하고, 홈/리포트 태동 그래프를 더 자연스러운 곡선 보간으로 바꾸며, 리포트 상단 UI와 차트 카드 헤더를 참고 이미지 스타일에 맞춰 조정해 달라고 요청했다.
+
+### Codex가 실행한 명령어
+
+- `Select-String -Path lib\main.dart -Pattern "homeAlertButton|class _MonitoringAssetWave|class _LineChartPainter|class _DailyDotChartPainter|class _ReportChartCardState|SegmentedButton|upload|calendar|_rangeLabel|_recordMovement" -Context 3,12`
+- `Get-Content -Encoding UTF8 lib\main.dart`
+- `dart analyze`
+- `dart format lib\main.dart`
+- `Get-Date -Format "yyyy-MM-dd HH:mm:ss K"`
+
+### 생성된 파일
+
+- 없음
+
+### 수정된 파일
+
+- `lib/main.dart`
+- `CODEX_LOG.md`
+
+### 결과 요약
+
+홈 알림 버튼을 연한 원형 배경, 검정 라인 아이콘, 코랄색 알림 점이 보이는 형태로 수정했다. 모니터링 원형 파형은 이미지 에셋 대신 `CustomPainter`로 직접 렌더링하도록 바꾸고, 상태에 따라 진폭과 투명도가 달라지게 했다. 수동 태동 기록에서 약함/중간/강함 선택 후 선택 영역이 닫히도록 수정했다. 태동 라인 그래프는 Catmull-Rom 계열 cubic 보간을 적용하고 데이터 없음 구간은 선과 채움이 끊기도록 개선했다. 리포트 화면은 전용 캡슐 탭, 원형 업로드/달력 버튼, 더 작은 날짜 이동 영역, 상단에 붙은 차트 헤더와 작은 확대/축소 버튼으로 조정했다. `dart analyze`는 통과했고, `dart format lib\main.dart`는 제한 시간 안에 완료되지 않았다.
+
+---
+
+## 2026-06-15 19:33:26 +09:00
+
+### 사용자 요청
+
+Figma 링크와 첨부 화면을 기준으로 홈, 모니터링, 리포트, MY 화면의 색감, 그래프 곡선/그라데이션, 태아 카드, 알림창, 하단 네비게이션, 배경, 알림음 선택 UI를 수정해 달라고 요청했다.
+
+### Codex가 실행한 명령어
+
+- `Select-String -Path lib\main.dart -Pattern "class _HomeHeadline|void _showAlerts|class MonitoringPage|onMovementRecorded|class _ReportChartCard|class _MyPageState|_buildProfileTab|_buildAlertSoundCard|_buildDeviceCard|_rangeLabel|ReportPage\(" -Context 3,8`
+- `git diff -- lib\main.dart pubspec.yaml CODEX_LOG.md`
+- `Get-Content -Encoding UTF8 lib\main.dart`
+- `dart analyze`
+- `dart format lib\main.dart`
+- `Get-Date -Format "yyyy-MM-dd HH:mm:ss K"`
+
+### 생성된 파일
+
+- 없음
+
+### 수정된 파일
+
+- `lib/main.dart`
+- `CODEX_LOG.md`
+
+### 결과 요약
+
+홈 화면 태아 카드 배경 이미지를 카드 크기에 맞게 채우고 태아 주변 원형 장식을 제거했다. 홈 헤드라인은 태명만 굵게 보이도록 바꾸고 알림 아이콘, 알림 목록, 개별 삭제, 모두 지우기, 닫기 버튼 동작을 실제 감지 알림 목록과 연결했다. 모니터링 화면은 상태 문구를 원 아래로 옮기고, 수동 태동 기록 버튼을 세션 시간 아래에서 약함/중간/강함 선택이 열리는 구조로 바꿨다. 리포트 화면은 배경, 날짜 이동 화살표, 차트 확대/축소 아이콘을 조정하고 주간 차트 확대는 비활성화했다. MY 화면은 알림음 선택 카드를 복부 센서 카드 위로 옮기고 하단 시트형 알림음 선택 UI를 추가했다. `dart analyze`는 통과했고, `dart format lib\main.dart`는 제한 시간 안에 완료되지 않았다.
+
+---
+
+## 2026-06-15
+
+### 사용자 요청
+
+첨부한 레퍼런스 화면처럼 색감, 그래프 형태, 그래프 색감, 모니터링 페이지 도형 등을 `CODEX 명령 로그.txt`의 이전 UI 지시를 참고해 수정해 달라고 요청했다.
+
+### Codex가 실행한 명령어
+
+- `Get-ChildItem -Force`
+- `Get-ChildItem -Recurse -Filter "*CODEX*"`
+- `Get-ChildItem -Recurse -Filter "*.dart" | Select-Object -ExpandProperty FullName`
+- `Get-Content -Raw "CODEX 명령 로그.txt"`
+- `Get-Content -Raw lib\main.dart`
+- `Get-Content -Raw pubspec.yaml`
+- `Get-Content -Raw CODEX_LOG.md`
+- `Select-String -Path lib\main.dart -Pattern "class .*Page|class .*Screen|Chart|Monitoring|Report|Bottom|Home|Profile|Calendar|Wave|Movement"`
+- `Get-ChildItem -Recurse assets\images | Select-Object FullName`
+- `Get-Date -Format "yyyy-MM-dd HH:mm:ss K"`
+- `dart format lib test`
+- `dart analyze`
+- `flutter test`
+
+### 생성된 파일
+
+- 없음
+
+### 수정된 파일
+
+- `lib/main.dart`
+- `CODEX_LOG.md`
+
+### 결과 요약
+
+앱 전체 테마의 코랄, 피치, 민트, 카드 테두리, 버튼 스타일을 레퍼런스에 맞게 조정했다. 홈 화면의 배경과 태아 카드 크기, 최근 태동 흐름 그래프 영역을 키웠고, 모니터링 화면의 원형 파형 asset 크기와 상태 카드, 세션 시간 카드 형태를 정리했다. 리포트 화면은 세그먼트 컨트롤 테마, 차트 카드, 캘린더 모달을 레퍼런스에 가깝게 다듬었고, 그래프 painter는 코랄 곡선, 옅은 채움, 초록 강조 막대, 회색 미측정 pill이 보이도록 수정했다. `dart analyze`는 통과했고, `dart format`과 `flutter test`는 제한 시간 안에 완료되지 않았다.
+
+---
 # Codex 작업 기록
 
 ## 2026-05-22
