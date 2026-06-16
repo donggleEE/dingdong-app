@@ -581,11 +581,13 @@ class _MovementAlertEntry {
 
 class _HomeScreenState extends State<HomeScreen> {
   int _selectedIndex = 0;
+  final Set<int> _visitedPageIndexes = {0};
   int _fetusStyle = 0;
   bool _deviceOn = false;
   bool _hasUnreadAlert = false;
   final List<_MovementAlertEntry> _alerts = [];
   String _sensorStatus = '복부 센서 자동 수신 준비 중';
+  DateTime _lastSensorStatusUpdate = DateTime.fromMillisecondsSinceEpoch(0);
   late int _profileStyle = widget.initialProfileStyle;
   late int _profileBackgroundIndex = widget.initialProfileBackgroundIndex;
   Uint8List? _fetusImageBytes;
@@ -611,6 +613,31 @@ class _HomeScreenState extends State<HomeScreen> {
     });
   }
 
+  void _selectPage(int index) {
+    if (_selectedIndex == index && _visitedPageIndexes.contains(index)) return;
+    setState(() {
+      _selectedIndex = index;
+      _visitedPageIndexes.add(index);
+    });
+  }
+
+  void _updateSensorStatus(String value) {
+    final now = DateTime.now();
+    final isImportant =
+        value == '태동 감지됨' ||
+        value.contains('연결') ||
+        value.contains('fallback') ||
+        value.contains('준비');
+    if (_sensorStatus == value && !isImportant) return;
+    if (!isImportant &&
+        now.difference(_lastSensorStatusUpdate) <
+            const Duration(seconds: 2)) {
+      return;
+    }
+    _lastSensorStatusUpdate = now;
+    setState(() => _sensorStatus = value);
+  }
+
   @override
   void initState() {
     super.initState();
@@ -622,9 +649,12 @@ class _HomeScreenState extends State<HomeScreen> {
   @override
   Widget build(BuildContext context) {
     final pages = [
-      _PageArtworkBackground(
-        asset: 'assets/images/background/stainbackground.png',
-        child: _DashboardPage(
+      _LazyTabPage(
+        active: _selectedIndex == 0,
+        built: _visitedPageIndexes.contains(0),
+        builder: (context) => _PageArtworkBackground(
+          asset: 'assets/images/background/stainbackground.png',
+          child: _DashboardPage(
           userId: widget.user.id,
           fetusName: widget.fetusName,
           fetusStyle: _fetusStyle,
@@ -634,8 +664,8 @@ class _HomeScreenState extends State<HomeScreen> {
           profileImageBytes: _profileImageBytes,
           hasUnreadAlert: _hasUnreadAlert,
           alerts: _alerts,
-          onOpenReport: () => setState(() => _selectedIndex = 2),
-          onOpenAccount: () => setState(() => _selectedIndex = 3),
+          onOpenReport: () => _selectPage(2),
+          onOpenAccount: () => _selectPage(3),
           onAlertsViewed: () => setState(() => _hasUnreadAlert = false),
           onDeleteAlert: (alert) => setState(() => _alerts.remove(alert)),
           onClearAlerts: () => setState(() {
@@ -648,27 +678,42 @@ class _HomeScreenState extends State<HomeScreen> {
           }),
           onChangeFetusImage: (value) =>
               setState(() => _fetusImageBytes = value),
+          ),
         ),
       ),
-      _PageArtworkBackground(
-        asset: 'assets/images/background/backgroundReport.png',
-        child: _MonitoringPage(
+      _LazyTabPage(
+        active: _selectedIndex == 1,
+        built: _visitedPageIndexes.contains(1),
+        builder: (context) => _PageArtworkBackground(
+          asset: 'assets/images/background/backgroundReport.png',
+          child: _MonitoringPage(
           userId: widget.user.id,
           fetusName: widget.fetusName,
-          onOpenReport: () => setState(() => _selectedIndex = 2),
-          onDeviceStateChanged: (value) => setState(() => _deviceOn = value),
-          onSensorStatusChanged: (value) =>
-              setState(() => _sensorStatus = value),
+          visible: _selectedIndex == 1,
+          onOpenReport: () => _selectPage(2),
+          onDeviceStateChanged: (value) {
+            if (_deviceOn == value) return;
+            setState(() => _deviceOn = value);
+          },
+          onSensorStatusChanged: _updateSensorStatus,
           onMovementRecorded: _addMovementAlert,
         ),
+        ),
       ),
-      _PageArtworkBackground(
-        asset: 'assets/images/background/stainbackground.png',
-        child: ReportPage(userId: widget.user.id),
+      _LazyTabPage(
+        active: _selectedIndex == 2,
+        built: _visitedPageIndexes.contains(2),
+        builder: (context) => _PageArtworkBackground(
+          asset: 'assets/images/background/stainbackground.png',
+          child: ReportPage(userId: widget.user.id),
+        ),
       ),
-      _PageArtworkBackground(
-        asset: 'assets/images/background/stainbackground.png',
-        child: MyPage(
+      _LazyTabPage(
+        active: _selectedIndex == 3,
+        built: _visitedPageIndexes.contains(3),
+        builder: (context) => _PageArtworkBackground(
+          asset: 'assets/images/background/stainbackground.png',
+          child: MyPage(
           user: widget.user,
           fetusName: widget.fetusName,
           profileStyle: _profileStyle,
@@ -691,6 +736,7 @@ class _HomeScreenState extends State<HomeScreen> {
           onChangeProfileImage: (value) =>
               unawaited(_changeProfileImage(value)),
         ),
+        ),
       ),
     ];
     return Scaffold(
@@ -707,7 +753,7 @@ class _HomeScreenState extends State<HomeScreen> {
               bottom: 10 + MediaQuery.viewPaddingOf(context).bottom,
               child: _PngBottomNavigationBar(
                 selectedIndex: _selectedIndex,
-                onSelected: (index) => setState(() => _selectedIndex = index),
+                onSelected: _selectPage,
               ),
             ),
           ],
@@ -734,6 +780,26 @@ class _PageArtworkBackground extends StatelessWidget {
         ),
       ),
       child: child,
+    );
+  }
+}
+
+class _LazyTabPage extends StatelessWidget {
+  const _LazyTabPage({
+    required this.active,
+    required this.built,
+    required this.builder,
+  });
+
+  final bool active;
+  final bool built;
+  final WidgetBuilder builder;
+
+  @override
+  Widget build(BuildContext context) {
+    return TickerMode(
+      enabled: active,
+      child: built ? builder(context) : const SizedBox.shrink(),
     );
   }
 }
@@ -1192,6 +1258,7 @@ class _MonitoringPage extends StatefulWidget {
   const _MonitoringPage({
     required this.userId,
     required this.fetusName,
+    required this.visible,
     required this.onOpenReport,
     required this.onDeviceStateChanged,
     required this.onSensorStatusChanged,
@@ -1199,6 +1266,7 @@ class _MonitoringPage extends StatefulWidget {
   });
   final String userId;
   final String fetusName;
+  final bool visible;
   final VoidCallback onOpenReport;
   final ValueChanged<bool> onDeviceStateChanged;
   final ValueChanged<String> onSensorStatusChanged;
@@ -1251,10 +1319,6 @@ class _MonitoringPageState extends State<_MonitoringPage>
   Timer? _httpPollTimer;
   WebSocket? _sensorSocket;
   StreamSubscription<dynamic>? _sensorSubscription;
-  late final AnimationController _waveController = AnimationController(
-    vsync: this,
-    duration: const Duration(seconds: 8),
-  )..repeat();
   Duration _elapsed = Duration.zero;
   Duration _pausedElapsed = Duration.zero;
   bool _deviceOn = true;
@@ -1270,6 +1334,8 @@ class _MonitoringPageState extends State<_MonitoringPage>
   String? _lastAlertMessage;
   DateTime? _startedAt;
   DateTime _activeDate = DateTime.now();
+  DateTime _lastSensorUiUpdate = DateTime.fromMillisecondsSinceEpoch(0);
+  int _lastSensorPeak = -1;
 
   String get _onKey => _MonitoringPage._prefKey(widget.userId, 'deviceOn');
   String get _startKey => _MonitoringPage._prefKey(widget.userId, 'startedAt');
@@ -1292,11 +1358,22 @@ class _MonitoringPageState extends State<_MonitoringPage>
   }
 
   @override
+  void didUpdateWidget(covariant _MonitoringPage oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (widget.visible == oldWidget.visible) return;
+    if (widget.visible) {
+      unawaited(_startSensorReception());
+    } else {
+      _stopSensorReception();
+      _setSensorStatus('모니터링 화면에서 수신 준비 중');
+    }
+  }
+
+  @override
   void dispose() {
     _timer?.cancel();
     _stopSensorReception();
     _httpClient.close(force: true);
-    _waveController.dispose();
     super.dispose();
   }
 
@@ -1338,7 +1415,11 @@ class _MonitoringPageState extends State<_MonitoringPage>
       widget.onDeviceStateChanged(_deviceOn);
     }
     if (millis == null && _deviceOn) _save();
-    unawaited(_startSensorReception());
+    if (widget.visible) {
+      unawaited(_startSensorReception());
+    } else {
+      _setSensorStatus('모니터링 화면에서 수신 준비 중');
+    }
   }
 
   void _tick() {
@@ -1350,7 +1431,7 @@ class _MonitoringPageState extends State<_MonitoringPage>
       _elapsed = Duration.zero;
       _save();
     }
-    if (_deviceOn && mounted) {
+    if (_deviceOn && mounted && widget.visible) {
       setState(
         () => _elapsed = _pausedElapsed + now.difference(_startedAt ?? now),
       );
@@ -1370,6 +1451,7 @@ class _MonitoringPageState extends State<_MonitoringPage>
   }
 
   Future<void> _startSensorReception() async {
+    if (!widget.visible) return;
     if (_sensorConnecting || _sensorSubscription != null) return;
     _sensorConnecting = true;
     _setSensorStatus('WS 연결 시도');
@@ -1396,6 +1478,7 @@ class _MonitoringPageState extends State<_MonitoringPage>
       _sensorSocket = null;
     }
     _sensorConnecting = false;
+    if (!widget.visible) return;
     _switchToHttpFallback();
   }
 
@@ -1404,7 +1487,7 @@ class _MonitoringPageState extends State<_MonitoringPage>
     _sensorSubscription = null;
     _sensorSocket?.close();
     _sensorSocket = null;
-    if (!mounted || _httpPollTimer != null) return;
+    if (!mounted || !widget.visible || _httpPollTimer != null) return;
     _setSensorStatus('HTTP fallback 수신 중');
     const url = 'http://192.168.4.1/data';
     _httpPollTimer = Timer.periodic(const Duration(milliseconds: 500), (_) {
@@ -1436,6 +1519,7 @@ class _MonitoringPageState extends State<_MonitoringPage>
   }
 
   void _stopSensorReception() {
+    _sensorConnecting = false;
     _sensorSubscription?.cancel();
     _sensorSubscription = null;
     _sensorSocket?.close();
@@ -1450,15 +1534,28 @@ class _MonitoringPageState extends State<_MonitoringPage>
       _setSensorStatus('파싱 실패');
       return;
     }
-    final event = _movementDetector.addSample(sample, DateTime.now());
-    if (mounted) {
+    final now = DateTime.now();
+    final event = _movementDetector.addSample(sample, now);
+    final status = sample.isUserMoving
+        ? '센서가 흔들리는 중'
+        : '센서 수신 중: peak ${sample.peak}';
+    final stateChanged =
+        _userMoving != sample.isUserMoving ||
+        _movementActive != sample.isMovementActive;
+    final peakChangedEnough = (_lastSensorPeak - sample.peak).abs() >= 80;
+    final canUpdateUi =
+        now.difference(_lastSensorUiUpdate) >=
+        const Duration(milliseconds: 50);
+
+    if (mounted && (stateChanged || (canUpdateUi && peakChangedEnough))) {
+      _lastSensorUiUpdate = now;
+      _lastSensorPeak = sample.peak;
       setState(() {
         _userMoving = sample.isUserMoving;
         _movementActive = sample.isMovementActive;
+        _sensorStatus = status;
       });
-      _setSensorStatus(
-        sample.isUserMoving ? '센서가 흔들리는 중' : '센서 수신 중: peak ${sample.peak}',
-      );
+      widget.onSensorStatusChanged(status);
     }
     if (event != null) {
       unawaited(_recordSensorMovement(event));
@@ -1566,6 +1663,7 @@ class _MonitoringPageState extends State<_MonitoringPage>
         ),
         const SizedBox(height: 46),
         SizedBox(
+          width: 280,
           height: 318,
           child: WaveMonitorWidget(
             connected: _sensorSocket != null,
@@ -3820,44 +3918,55 @@ class _WaveMonitorWidgetState extends State<WaveMonitorWidget>
   }
 
   @override
-  Widget build(BuildContext context) => Center(
-    child: SizedBox(
-      width: 280,
-      height: 318,
-      child: Stack(
-        alignment: Alignment.topCenter,
-        clipBehavior: Clip.none,
-        children: [
-          SizedBox.square(
-            dimension: 280,
-            child: AnimatedBuilder(
-              animation: _controller,
-              builder: (context, _) => CustomPaint(
-                painter: _WaveMonitorPainter(
-                  phase: _controller.value,
-                  connected: widget.connected,
-                  userMoving: widget.userMoving,
-                  movementActive: widget.movementActive,
-                ),
-                child: const SizedBox.expand(),
+  Widget build(BuildContext context) {
+    final active = widget.connected || widget.movementActive;
+
+    return Center(
+      child: SizedBox(
+        width: 280,
+        height: 318,
+        child: Stack(
+          alignment: Alignment.topCenter,
+          clipBehavior: Clip.none,
+          children: [
+            SizedBox.square(
+              dimension: 280,
+              child: Stack(
+                alignment: Alignment.center,
+                children: [
+                  Image.asset(
+                    _monitoringStainAsset,
+                    width: 276,
+                    height: 276,
+                    fit: BoxFit.contain,
+                  ),
+                  Transform.scale(
+                    scale: 1.28,
+                    child: Image.asset(
+                      _monitoringCircleAsset,
+                      width: 270,
+                      height: 270,
+                      fit: BoxFit.contain,
+                    ),
+                  ),
+                  RepaintBoundary(
+                    child: SizedBox.square(
+                      dimension: 280,
+                      child: CustomPaint(
+                        painter: _MonitoringWavePainter(
+                          active: active,
+                          phase: _controller,
+                        ),
+                      ),
+                    ),
+                  ),
+                ],
               ),
             ),
-          ),
-          Positioned(
-            left: 0,
-            right: 0,
-            bottom: 0,
-            child: AnimatedBuilder(
-              animation: _controller,
-              builder: (context, child) => Transform.translate(
-                offset: Offset(
-                  widget.userMoving
-                      ? math.sin(_controller.value * math.pi * 18) * 4
-                      : 0,
-                  0,
-                ),
-                child: child,
-              ),
+            Positioned(
+              left: 0,
+              right: 0,
+              bottom: 0,
               child: Text(
                 _statusText,
                 textAlign: TextAlign.center,
@@ -3867,104 +3976,104 @@ class _WaveMonitorWidgetState extends State<WaveMonitorWidget>
                 ),
               ),
             ),
-          ),
-        ],
+          ],
+        ),
       ),
-    ),
-  );
+    );
+  }
 }
 
-class _WaveMonitorPainter extends CustomPainter {
-  const _WaveMonitorPainter({
+class _MonitoringWavePainter extends CustomPainter {
+  const _MonitoringWavePainter({
+    required this.active,
     required this.phase,
-    required this.connected,
-    required this.userMoving,
-    required this.movementActive,
-  });
+  }) : super(repaint: phase);
 
-  final double phase;
-  final bool connected;
-  final bool userMoving;
-  final bool movementActive;
+  final bool active;
+  final Animation<double> phase;
+
+  static const Color _waveColor = Color(0xFFFFA279);
+  static const int _pointCount = 96;
 
   @override
   void paint(Canvas canvas, Size size) {
     final center = Offset(size.width / 2, size.height / 2);
-    final radius = math.min(size.width, size.height) / 2 - 6;
-    final circlePath = Path()
-      ..addOval(Rect.fromCircle(center: center, radius: radius));
+    final radius = math.min(size.width, size.height) * 0.42;
+    final circleRect = Rect.fromCircle(center: center, radius: radius);
+    final circlePath = Path()..addOval(circleRect);
+
+    final baseY = center.dy + radius * 0.04;
+    final amplitude = active ? 30.0 : 10.0;
+    final waveLength = radius * 0.62;
+
+    final wavePath = Path();
+    final fillPath = Path();
+
+    final startX = center.dx - radius;
+    final endX = center.dx + radius;
+
+    final phaseRadians = phase.value * math.pi * 2;
+
+    for (var i = 0; i <= _pointCount; i++) {
+      final progress = i / _pointCount;
+      final x = startX + (endX - startX) * progress;
+
+      final y = baseY +
+          math.sin(((x / waveLength) * math.pi * 2) + phaseRadians) *
+              amplitude;
+
+      if (i == 0) {
+        wavePath.moveTo(x, y);
+        fillPath.moveTo(x, y);
+      } else {
+        wavePath.lineTo(x, y);
+        fillPath.lineTo(x, y);
+      }
+    }
+
+    fillPath
+      ..lineTo(endX, center.dy + radius)
+      ..lineTo(startX, center.dy + radius)
+      ..close();
 
     canvas.save();
     canvas.clipPath(circlePath);
 
-    final power = movementActive
-        ? 1.0
-        : userMoving
-        ? .72
-        : connected
-        ? .62
-        : .24;
-    final amplitude = 9 + 28 * power;
-    final baseline = center.dy + radius * .12;
-    final wavelength = size.width / 2.35;
-    final horizontalShift = phase * wavelength;
-    final points = <Offset>[];
-    for (var x = -wavelength * 2; x <= size.width + wavelength * 2; x += 5) {
-      final primary = math.sin(((x + horizontalShift) / wavelength) * math.pi * 2);
-      final secondary = math.sin(((x + horizontalShift * .7) / wavelength) * math.pi * 4);
-      points.add(
-        Offset(
-          x,
-          baseline + primary * amplitude + secondary * amplitude * .10,
-        ),
-      );
-    }
+    final fillPaint = Paint()
+      ..style = PaintingStyle.fill
+      ..shader = const LinearGradient(
+        begin: Alignment.topCenter,
+        end: Alignment.bottomCenter,
+        colors: [
+          Color(0x66FFA279),
+          Color(0x22FFA279),
+          Color(0x00FFA279),
+        ],
+        stops: [
+          0.0,
+          0.55,
+          1.0,
+        ],
+      ).createShader(circleRect);
 
-    final wavePath = _smoothPathForPoints(points);
-    final fillPath = Path.from(wavePath)
-      ..lineTo(size.width + wavelength * 2, size.height)
-      ..lineTo(-wavelength * 2, size.height)
-      ..close();
+    canvas.drawPath(fillPath, fillPaint);
 
-    canvas.drawPath(
-      fillPath,
-      Paint()
-        ..shader = ui.Gradient.linear(
-          Offset(0, baseline - amplitude),
-          Offset(0, size.height),
-          [
-            const Color(0xFFFFD7C6).withValues(alpha: .62),
-            const Color(0xFFFFD7C6).withValues(alpha: .30),
-            const Color(0xFFFFD7C6).withValues(alpha: 0),
-          ],
-        ),
-    );
-    canvas.drawPath(
-      wavePath,
-      Paint()
-        ..color = AppColors.coral.withValues(alpha: connected ? .92 : .70)
-        ..style = PaintingStyle.stroke
-        ..strokeWidth = 4
-        ..strokeCap = StrokeCap.round,
-    );
+    final wavePaint = Paint()
+      ..color = _waveColor
+      ..style = PaintingStyle.stroke
+      ..strokeWidth = 2.4
+      ..strokeCap = StrokeCap.round
+      ..strokeJoin = StrokeJoin.round;
+
+    canvas.drawPath(wavePath, wavePaint);
+
     canvas.restore();
-
-    canvas.drawCircle(
-      center,
-      radius,
-      Paint()
-        ..color = const Color(0xFFFFCDBD).withValues(alpha: .86)
-        ..style = PaintingStyle.stroke
-        ..strokeWidth = 5,
-    );
   }
 
   @override
-  bool shouldRepaint(covariant _WaveMonitorPainter oldDelegate) =>
-      oldDelegate.phase != phase ||
-      oldDelegate.connected != connected ||
-      oldDelegate.userMoving != userMoving ||
-      oldDelegate.movementActive != movementActive;
+  bool shouldRepaint(covariant _MonitoringWavePainter oldDelegate) {
+    return oldDelegate.active != active || oldDelegate.phase != phase;
+  }
 }
 
 enum _ChartMode { bar, line, dailyDots, dailyBars }
@@ -5144,6 +5253,8 @@ class _SelectableProfileTile extends StatelessWidget {
 const _fetusAbstractObjectAsset =
     'assets/images/fetal/abstract_fetal_object.png';
 const _fetusRealObjectAsset = 'assets/images/fetal/fetus_real_object.png';
+const _monitoringCircleAsset = 'assets/images/monitoring/circle.png';
+const _monitoringStainAsset = 'assets/images/monitoring/stain.png';
 const _profileAssetPaths = [
   'assets/images/profile/profile_01_object.png',
   'assets/images/profile/profile_02_object.png',
