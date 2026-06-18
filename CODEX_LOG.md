@@ -636,3 +636,152 @@ Flutter 실행 로그에서 `Width is zero`, 프레임 스킵, `Davey!`, 메인 
 `IndexedStack` 안의 모든 화면이 앱 시작 시 한꺼번에 빌드되던 구조를 `_LazyTabPage`로 바꿔, 홈 화면만 먼저 만들고 모니터링/리포트/My 화면은 해당 탭을 방문할 때 처음 생성되도록 최적화했다. 숨겨진 탭에는 `TickerMode`를 적용해 애니메이션 ticker가 돌지 않게 했다. 모니터링 페이지는 `visible` 상태일 때만 WebSocket/HTTP 센서 수신을 시작하고, 다른 탭으로 이동하면 소켓과 폴링을 정리하도록 했다. 센서 상태 문자열이 상위 화면을 너무 자주 `setState`하지 않도록 2초 단위로 제한하고, 같은 탭 선택과 같은 기기 상태 반복 업데이트도 무시하도록 했다. 앱 시작 시 튕김을 유발할 수 있던 `_restore()` 내부 `pefs` 오타를 `prefs`로 수정했다. `dart analyze`는 통과했다.
 
 ---
+## 2026-06-16 12:55:32 +09:00
+
+### 사용자 요청
+
+모니터링 탭이 보일 때만 WebSocket 센서 수신을 하도록 만든 부분을 수정해 달라고 요청했다.
+
+### Codex가 실행한 명령어
+
+- `Select-String -Path lib\main.dart -Pattern "_visitedPageIndexes|visible|required this.visible|widget.visible|_startSensorReception|_switchToHttpFallback|_MonitoringPage\(" -Context 2,3`
+- `Get-Content -Encoding UTF8 -Path lib\main.dart | Select-Object -Skip 580 -First 140`
+- `Get-Content -Encoding UTF8 -Path lib\main.dart | Select-Object -Skip 1250 -First 250`
+- `dart analyze`
+- `Get-Date -Format "yyyy-MM-dd HH:mm:ss K"`
+
+### 생성된 파일
+
+- 없음
+
+### 수정된 파일
+
+- `lib/main.dart`
+- `CODEX_LOG.md`
+
+### 결과 요약
+
+모니터링 탭 표시 여부인 `visible`과 센서 수신 활성 여부를 분리해 `sensorEnabled`를 추가했다. 모니터링 페이지는 앱 시작 시 생성되도록 `_visitedPageIndexes` 초기값에 `1`을 포함했고, `sensorEnabled: true`로 WebSocket/HTTP 센서 수신이 모니터링 탭 표시 여부와 무관하게 유지되도록 수정했다. `visible`은 세션 시간 UI 갱신과 숨겨진 탭의 애니메이션 제어 용도로만 남겼다. `dart analyze`는 통과했다.
+
+---
+## 2026-06-16 13:02:15 +09:00
+
+### 사용자 요청
+
+오전 11시 39분쯤 처리했던 모니터링과 ESP 관련 사항만 다시 되돌려 달라고 요청했다.
+
+### Codex가 실행한 명령어
+
+- `Select-String -Path CODEX_LOG.md -Pattern "2026-06-16 11:|2026-06-16 12:|WebSocket|ESP|센서|모니터링" -Context 2,4`
+- `git diff -- lib\main.dart`
+- `Select-String -Path lib\main.dart -Pattern "_LazyTabPage|_visitedPageIndexes|sensorEnabled|visible: _selectedIndex|didUpdateWidget|widget.visible|widget.sensorEnabled|_lastSensorStatusUpdate|_lastSensorUiUpdate|_lastSensorPeak" -Context 2,3`
+- `Get-Content -Encoding UTF8 lib\main.dart`
+- `dart analyze`
+- `Get-Date -Format "yyyy-MM-dd HH:mm:ss K"`
+
+### 생성된 파일
+
+- 없음
+
+### 수정된 파일
+
+- `lib/main.dart`
+- `CODEX_LOG.md`
+
+### 결과 요약
+
+11시 39분대 모니터링/ESP 생명주기 최적화에 해당하는 `_LazyTabPage`, 방문 탭 추적, 상위 센서 상태 throttle, `visible`/`sensorEnabled` 기반 WebSocket 제어를 제거했다. `IndexedStack`의 각 페이지는 다시 직접 구성되며, 모니터링 페이지는 복원 후 곧바로 `_startSensorReception()`을 호출하고 WebSocket 실패 시 HTTP fallback도 화면 표시 여부와 무관하게 동작하도록 되돌렸다. `pefs` 오타 수정과 파형 크기 안정화 등 다른 오류 수정은 유지했다. `dart analyze`는 통과했다.
+
+---
+## 2026-06-16 13:19:25 +09:00
+
+### 사용자 요청
+
+방금 되돌렸던 모니터링/ESP 관련 작업을 다시 적용해 달라고 요청했다.
+
+### Codex가 실행한 명령어
+
+- `Get-Content -Encoding UTF8 -Path lib\main.dart | Select-Object -Skip 580 -First 230`
+- `Get-Content -Encoding UTF8 -Path lib\main.dart | Select-Object -Skip 1180 -First 240`
+- `Select-String -Path lib\main.dart -Pattern "_LazyTabPage|_visitedPageIndexes|sensorEnabled|visible|didUpdateWidget|_startSensorReception|_switchToHttpFallback|_lastSensorStatusUpdate" -Context 1,2`
+- `dart analyze`
+- `Get-Date -Format "yyyy-MM-dd HH:mm:ss K"`
+
+### 생성된 파일
+
+- 없음
+
+### 수정된 파일
+
+- `lib/main.dart`
+- `CODEX_LOG.md`
+
+### 결과 요약
+
+11시 39분대 모니터링/ESP 생명주기 최적화 상태를 다시 적용했다. `_LazyTabPage`, 방문 탭 추적, `_selectPage`, 센서 상태 throttle을 복원했고, 모니터링 페이지는 `visible` 값에 따라 WebSocket/HTTP fallback 수신을 시작하거나 정리하도록 다시 연결했다. 숨겨진 탭은 `TickerMode`로 ticker가 꺼지고, `dart analyze`는 통과했다.
+
+---
+
+---
+## 2026-06-18 11:07:10 +09:00
+
+### 사용자 요청
+
+ESP32 WebSocket/HTTP fallback 수신 로직을 _MonitoringPageState에서 분리해 앱 전체에서 살아있는 EspSensorService 싱글톤으로 옮기고, HomeScreen에서 서비스 시작/상태 구독/태동 알림 처리를 하도록 요청했다.
+
+### Codex가 실행한 명령어
+
+- Get-ChildItem -Force
+- Get-ChildItem -Recurse -Filter *.dart | Select-Object -ExpandProperty FullName
+- Select-String -Path lib\**\*.dart,lib\main.dart -Pattern "class _MonitoringPageState|_startSensorReception|WebSocket|fallback|parseBeltSensorSample|BeltMovementDetector|MovementRepository|_LazyTabPage|HomeScreen|logout|signOut" -Context 2,3
+- Get-Content -Path lib\main.dart ...
+- Get-Content -Path lib\services\belt_message_parser.dart
+- Get-Content -Path lib\repositories\movement_repository.dart
+- dart analyze
+- dart format lib\main.dart lib\services\esp_sensor_service.dart (시간 초과)
+- git diff --stat
+- git status --short
+
+### 생성된 파일
+
+- lib/services/esp_sensor_service.dart
+
+### 수정된 파일
+
+- lib/main.dart
+- CODEX_LOG.md
+
+### 결과 요약
+
+EspSensorState, EspMovementEvent, EspSensorService를 추가해 WebSocket 연결, HTTP fallback 1000ms polling, 센서 파싱, BeltMovementDetector, 태동 기록 저장, 기기 세션 저장, watchdog/reconnect, 200ms 상태 emit throttle을 서비스로 분리했다. HomeScreen은 로그인 사용자 기준으로 서비스를 시작하고 stateStream/movementStream을 구독해 _deviceOn, _sensorStatus, _espState, 알림 리스트를 갱신한다. 로그아웃 시 EspSensorService.instance.stop()으로 수신과 세션을 정리한다. _MonitoringPage는 서비스 상태를 받아 표시하고 수동 기록 콜백만 호출하는 UI 위젯으로 축소했다. dart analyze는 통과했으며, dart format은 도구 응답 지연으로 시간 초과되었다.
+
+---
+## 2026-06-18 15:18:43 +09:00
+
+### 사용자 요청
+
+이전 적용 후 한글이 깨졌으니 다시 검토하고 요청사항을 적용해 달라고 요청했다.
+
+### Codex가 실행한 명령어
+
+- `git status --short`
+- `[System.IO.File]::ReadAllLines(..., [System.Text.UTF8Encoding]::new($false))`
+- `dart analyze`
+- `git restore --source=HEAD -- lib\main.dart`
+- `Select-String -Path lib\main.dart -Pattern "..."`
+- `dart format lib\main.dart lib\services\esp_sensor_service.dart`
+- `git diff --stat -- lib\main.dart CODEX_LOG.md`
+- `Get-Date -Format "yyyy-MM-dd HH:mm:ss K"`
+
+### 생성된 파일
+
+- `lib/services/esp_sensor_service.dart`
+
+### 수정된 파일
+
+- `lib/main.dart`
+- `CODEX_LOG.md`
+
+### 결과 요약
+
+깨진 `lib/main.dart`를 Git의 정상 기준 파일로 복구한 뒤 한글 문자열이 정상인지 확인했다. 이후 ESP32 WebSocket/HTTP fallback 수신 분리 작업을 다시 적용해 `EspSensorService`가 수신과 저장을 담당하고 `HomeScreen`이 서비스 스트림을 구독하도록 구성했다. `_MonitoringPage`는 `EspSensorState` 표시와 수동 기록 UI만 담당하도록 축소했다. `dart analyze`는 통과했으며, `dart format`은 도구 응답 지연으로 시간 초과되었다.

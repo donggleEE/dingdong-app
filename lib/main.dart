@@ -1,6 +1,5 @@
 import 'dart:async';
 import 'dart:convert';
-import 'dart:io';
 import 'dart:math' as math;
 import 'dart:ui' as ui;
 
@@ -16,6 +15,7 @@ import 'models/app_user.dart';
 import 'repositories/auth_repository.dart';
 import 'repositories/movement_repository.dart';
 import 'services/belt_message_parser.dart';
+import 'services/esp_sensor_service.dart';
 
 const _alertSoundAssets = [
   'assets/sounds/dingdong1.mp3',
@@ -89,7 +89,6 @@ String _pickMovementAlertMessage(
   final name = fetusName.trim().isEmpty ? '아기' : fetusName.trim();
   return picked
       .replaceAll('(태명)', name)
-      .replaceAll('(?쒕챸)', name)
       .replaceAll('(태명 )', name);
 }
 
@@ -582,12 +581,20 @@ class _MovementAlertEntry {
 class _HomeScreenState extends State<HomeScreen> {
   int _selectedIndex = 0;
   final Set<int> _visitedPageIndexes = {0};
+  
   int _fetusStyle = 0;
   bool _deviceOn = false;
   bool _hasUnreadAlert = false;
   final List<_MovementAlertEntry> _alerts = [];
   String _sensorStatus = '복부 센서 자동 수신 준비 중';
   DateTime _lastSensorStatusUpdate = DateTime.fromMillisecondsSinceEpoch(0);
+  EspSensorState _espState = EspSensorService.instance.currentState;
+  StreamSubscription<EspSensorState>? _espStateSubscription;
+  StreamSubscription<EspMovementEvent>? _espMovementSubscription;
+  bool _recordingMovement = false;
+  String _selectedAlertSound = _alertSoundAssets.first;
+  List<String> _alertMessages = const [];
+  String? _lastAlertMessage;
   late int _profileStyle = widget.initialProfileStyle;
   late int _profileBackgroundIndex = widget.initialProfileBackgroundIndex;
   Uint8List? _fetusImageBytes;
@@ -641,9 +648,169 @@ class _HomeScreenState extends State<HomeScreen> {
   @override
   void initState() {
     super.initState();
-    _MonitoringPage.isDeviceOnForUser(widget.user.id).then((value) {
-      if (mounted) setState(() => _deviceOn = value);
+    _restoreAlertSettings();
+    _espStateSubscription = EspSensorService.instance.stateStream.listen(
+      _handleEspState,
+    );
+    _espMovementSubscription = EspSensorService.instance.movementStream.listen(
+      (event) => unawaited(_handleEspMovement(event)),
+    );
+    unawaited(EspSensorService.instance.start(userId: widget.user.id));
+    _handleEspState(EspSensorService.instance.currentState);
+
+    unawaited(_seedJune2026DummyMovementsOnce());
+  }
+
+  @override
+  void dispose() {
+    _espStateSubscription?.cancel();
+    _espMovementSubscription?.cancel();
+    super.dispose();
+  }
+
+  Future<void> _restoreAlertSettings() async {
+    final sound = await _loadAlertSoundAsset(widget.user.id);
+    final messages = await _loadMovementAlertMessages();
+    if (!mounted) return;
+    setState(() {
+      _selectedAlertSound = sound;
+      _alertMessages = messages;
     });
+  }
+
+  void _handleEspState(EspSensorState state) {
+    if (!mounted) return;
+    setState(() {
+      _espState = state;
+      _deviceOn = state.connected;
+    });
+    _updateSensorStatus(state.status);
+  }
+
+  Future<void> _handleEspMovement(EspMovementEvent event) async {
+    await _playAlertSound(_selectedAlertSound);
+    if (!mounted) return;
+    final message = _pickMovementAlertMessage(
+      _alertMessages,
+      event.intensity,
+      fetusName: widget.fetusName,
+      previousMessage: _lastAlertMessage,
+    );
+    final displayMessage = event.measuredDuringUserMotion
+        ? '$message 사용자 움직임이 섞였을 수 있어요.'
+        : message;
+    _lastAlertMessage = message;
+    _addMovementAlert(
+      _MovementAlertEntry(
+        createdAt: event.createdAt,
+        intensity: event.intensity,
+        message: displayMessage,
+      ),
+    );
+  }
+
+  Future<void> _seedJune2026DummyMovementsOnce() async {
+    final userId = widget.user.id;
+    final prefs = await SharedPreferences.getInstance();
+    final seedKey = 'dummy.june2026.seeded.$userId';
+
+    if (prefs.getBool(seedKey) ?? false) return;
+
+    final repository = MovementRepository();
+    final random = math.Random(20260618);
+
+    // 6월 18일 이전 기준.
+    // 3, 7, 11, 14, 17일은 측정 없이 지나간 날.
+    // 나머지는 모두 20회 초과, 200회 미만.
+    const dailyCounts = <int, int>{
+      1: 62,
+      2: 88,
+      4: 35,
+      5: 124,
+      6: 77,
+      8: 42,
+      9: 96,
+      10: 153,
+      12: 69,
+      13: 118,
+      15: 82,
+      16: 41,
+    };
+
+    for (final entry in dailyCounts.entries) {
+      final day = entry.key;
+      final count = entry.value;
+      final usedMinutes = <int>{};
+
+      for (var i = 0; i < count; i++) {
+        // 06:00 ~ 23:30 사이에서 생성
+        var minuteOfDay = 6 * 60 + random.nextInt(17 * 60 + 30);
+
+        // 완전 동일 시간만 너무 많아지는 것 방지
+        var guard = 0;
+        while (usedMinutes.contains(minuteOfDay) && guard < 20) {
+          minuteOfDay = 6 * 60 + random.nextInt(17 * 60 + 30);
+          guard++;
+        }
+        usedMinutes.add(minuteOfDay);
+
+        final measuredAt = DateTime(
+          2026,
+          6,
+          day,
+          minuteOfDay ~/ 60,
+          minuteOfDay % 60,
+          random.nextInt(60),
+        );
+
+        // 2000~4095 사이. 리포트에서 _sensorIntensityRatio로 0~100% 환산됨.
+        final intensity = 2100 + random.nextInt(1900);
+
+        await repository.addRecord(
+          userId: userId,
+          measuredAt: measuredAt,
+          intensity: intensity,
+          measuredDuringUserMotion: random.nextDouble() < 0.08,
+        );
+      }
+    }
+
+    await prefs.setBool(seedKey, true);
+
+    if (mounted) {
+      setState(() {});
+    }
+  }
+
+  Future<void> _recordManualMovement(int intensity) async {
+    if (_recordingMovement) return;
+    setState(() => _recordingMovement = true);
+    final now = DateTime.now();
+    try {
+      await MovementRepository().addRecord(
+        userId: widget.user.id,
+        measuredAt: now,
+        intensity: intensity,
+      );
+      await _playAlertSound(_selectedAlertSound);
+      if (!mounted) return;
+      final message = _pickMovementAlertMessage(
+        _alertMessages,
+        intensity,
+        fetusName: widget.fetusName,
+        previousMessage: _lastAlertMessage,
+      );
+      _lastAlertMessage = message;
+      _addMovementAlert(
+        _MovementAlertEntry(
+          createdAt: now,
+          intensity: intensity,
+          message: message,
+        ),
+      );
+    } finally {
+      if (mounted) setState(() => _recordingMovement = false);
+    }
   }
 
   @override
@@ -652,58 +819,52 @@ class _HomeScreenState extends State<HomeScreen> {
       _LazyTabPage(
         active: _selectedIndex == 0,
         built: _visitedPageIndexes.contains(0),
-        builder: (context) => _PageArtworkBackground(
+        builder: (context) => _ScrollableArtworkBackground(
           asset: 'assets/images/background/stainbackground.png',
           child: _DashboardPage(
-          userId: widget.user.id,
-          fetusName: widget.fetusName,
-          fetusStyle: _fetusStyle,
-          fetusImageBytes: _fetusImageBytes,
-          profileStyle: _profileStyle,
-          profileBackgroundIndex: _profileBackgroundIndex,
-          profileImageBytes: _profileImageBytes,
-          hasUnreadAlert: _hasUnreadAlert,
-          alerts: _alerts,
-          onOpenReport: () => _selectPage(2),
-          onOpenAccount: () => _selectPage(3),
-          onAlertsViewed: () => setState(() => _hasUnreadAlert = false),
-          onDeleteAlert: (alert) => setState(() => _alerts.remove(alert)),
-          onClearAlerts: () => setState(() {
-            _alerts.clear();
-            _hasUnreadAlert = false;
-          }),
-          onChangeFetusStyle: (value) => setState(() {
-            _fetusStyle = value;
-            _fetusImageBytes = null;
-          }),
-          onChangeFetusImage: (value) =>
-              setState(() => _fetusImageBytes = value),
+            userId: widget.user.id,
+            fetusName: widget.fetusName,
+            fetusStyle: _fetusStyle,
+            fetusImageBytes: _fetusImageBytes,
+            profileStyle: _profileStyle,
+            profileBackgroundIndex: _profileBackgroundIndex,
+            profileImageBytes: _profileImageBytes,
+            hasUnreadAlert: _hasUnreadAlert,
+            alerts: _alerts,
+            onOpenReport: () => _selectPage(2),
+            onOpenAccount: () => _selectPage(3),
+            onAlertsViewed: () => setState(() => _hasUnreadAlert = false),
+            onDeleteAlert: (alert) => setState(() => _alerts.remove(alert)),
+            onClearAlerts: () => setState(() {
+              _alerts.clear();
+              _hasUnreadAlert = false;
+            }),
+            onChangeFetusStyle: (value) => setState(() {
+              _fetusStyle = value;
+              _fetusImageBytes = null;
+            }),
+            onChangeFetusImage: (value) => setState(() => _fetusImageBytes = value),
           ),
         ),
       ),
       _LazyTabPage(
         active: _selectedIndex == 1,
         built: _visitedPageIndexes.contains(1),
-        builder: (context) => _PageArtworkBackground(
+        builder: (context) => _ScrollableArtworkBackground(
           asset: 'assets/images/background/backgroundReport.png',
           child: _MonitoringPage(
-          userId: widget.user.id,
-          fetusName: widget.fetusName,
-          visible: _selectedIndex == 1,
-          onOpenReport: () => _selectPage(2),
-          onDeviceStateChanged: (value) {
-            if (_deviceOn == value) return;
-            setState(() => _deviceOn = value);
-          },
-          onSensorStatusChanged: _updateSensorStatus,
-          onMovementRecorded: _addMovementAlert,
-        ),
+            sensorState: _espState,
+            recordingMovement: _recordingMovement,
+            onOpenReport: () => _selectPage(2),
+            onManualRecord: (intensity) =>
+                unawaited(_recordManualMovement(intensity)),
+          ),
         ),
       ),
       _LazyTabPage(
         active: _selectedIndex == 2,
         built: _visitedPageIndexes.contains(2),
-        builder: (context) => _PageArtworkBackground(
+        builder: (context) => _ScrollableArtworkBackground(
           asset: 'assets/images/background/stainbackground.png',
           child: ReportPage(userId: widget.user.id),
         ),
@@ -711,41 +872,45 @@ class _HomeScreenState extends State<HomeScreen> {
       _LazyTabPage(
         active: _selectedIndex == 3,
         built: _visitedPageIndexes.contains(3),
-        builder: (context) => _PageArtworkBackground(
+        builder: (context) => _ScrollableArtworkBackground(
           asset: 'assets/images/background/stainbackground.png',
           child: MyPage(
-          user: widget.user,
-          fetusName: widget.fetusName,
-          profileStyle: _profileStyle,
-          profileBackgroundIndex: _profileBackgroundIndex,
-          profileImageBytes: _profileImageBytes,
-          deviceOn: _deviceOn,
-          sensorStatus: _sensorStatus,
-          authRepository: widget.authRepository,
-          onUserChanged: (user) => widget.onUserChanged(user),
-          onLogout: () async {
-            await _MonitoringPage.stopDeviceForUser(widget.user.id);
-            await widget.authRepository.logout();
-            widget.onSignedOut();
-          },
-          onFetusNameChanged: widget.onFetusNameChanged,
-          onChangeProfileStyle: (value) =>
-              unawaited(_changeProfileStyle(value)),
-          onChangeProfileBackground: (value) =>
-              setState(() => _profileBackgroundIndex = value),
-          onChangeProfileImage: (value) =>
-              unawaited(_changeProfileImage(value)),
-        ),
+            user: widget.user,
+            fetusName: widget.fetusName,
+            profileStyle: _profileStyle,
+            profileBackgroundIndex: _profileBackgroundIndex,
+            profileImageBytes: _profileImageBytes,
+            deviceOn: _deviceOn,
+            sensorStatus: _sensorStatus,
+            authRepository: widget.authRepository,
+            onUserChanged: (user) => widget.onUserChanged(user),
+            onLogout: () async {
+              await EspSensorService.instance.stop();
+              await widget.authRepository.logout();
+              widget.onSignedOut();
+            },
+            onFetusNameChanged: widget.onFetusNameChanged,
+            onChangeProfileStyle: (value) =>
+                unawaited(_changeProfileStyle(value)),
+            onChangeProfileBackground: (value) =>
+                setState(() => _profileBackgroundIndex = value),
+            onChangeProfileImage: (value) =>
+                unawaited(_changeProfileImage(value)),
+          ),
         ),
       ),
     ];
     return Scaffold(
+      backgroundColor: Colors.white,
       body: SafeArea(
         bottom: false,
         child: Stack(
           children: [
             Positioned.fill(
-              child: IndexedStack(index: _selectedIndex, children: pages),
+              child: IndexedStack(
+                index: _selectedIndex,
+                children: pages,
+              ),
             ),
             Positioned(
               left: 0,
@@ -759,27 +924,6 @@ class _HomeScreenState extends State<HomeScreen> {
           ],
         ),
       ),
-    );
-  }
-}
-
-class _PageArtworkBackground extends StatelessWidget {
-  const _PageArtworkBackground({required this.asset, required this.child});
-
-  final String asset;
-  final Widget child;
-
-  @override
-  Widget build(BuildContext context) {
-    return DecoratedBox(
-      decoration: BoxDecoration(
-        color: Colors.white,
-        image: DecorationImage(
-          image: AssetImage(asset),
-          fit: BoxFit.cover,
-        ),
-      ),
-      child: child,
     );
   }
 }
@@ -800,6 +944,95 @@ class _LazyTabPage extends StatelessWidget {
     return TickerMode(
       enabled: active,
       child: built ? builder(context) : const SizedBox.shrink(),
+    );
+  }
+}
+
+class _ScrollableArtworkBackground extends StatefulWidget {
+  const _ScrollableArtworkBackground({
+    required this.asset,
+    required this.child,
+  });
+
+  final String asset;
+  final Widget child;
+
+  @override
+  State<_ScrollableArtworkBackground> createState() =>
+      _ScrollableArtworkBackgroundState();
+}
+
+class _ScrollableArtworkBackgroundState
+    extends State<_ScrollableArtworkBackground> {
+  double _scrollOffset = 0;
+  double _maxScrollExtent = 0;
+
+  bool _handleScroll(ScrollNotification notification) {
+    final metrics = notification.metrics;
+
+    final nextMaxScrollExtent = math.max(0.0, metrics.maxScrollExtent);
+    final nextScrollOffset = metrics.pixels.clamp(
+      0.0,
+      nextMaxScrollExtent,
+    );
+
+    final offsetChanged = (nextScrollOffset - _scrollOffset).abs() > 0.5;
+    final extentChanged =
+        (nextMaxScrollExtent - _maxScrollExtent).abs() > 0.5;
+
+    if (offsetChanged || extentChanged) {
+      setState(() {
+        _scrollOffset = nextScrollOffset;
+        _maxScrollExtent = nextMaxScrollExtent;
+      });
+    }
+
+    return false;
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return LayoutBuilder(
+      builder: (context, constraints) {
+        final viewportHeight = constraints.maxHeight.isFinite
+            ? constraints.maxHeight
+            : MediaQuery.sizeOf(context).height;
+
+        final backgroundHeight = math.max(
+          viewportHeight,
+          viewportHeight + _maxScrollExtent,
+        );
+
+        final backgroundTop = -_scrollOffset.clamp(
+          0.0,
+          _maxScrollExtent,
+        );
+
+        return NotificationListener<ScrollNotification>(
+          onNotification: _handleScroll,
+          child: Stack(
+            children: [
+              Positioned(
+                left: 0,
+                right: 0,
+                top: backgroundTop,
+                height: backgroundHeight,
+                child: RepaintBoundary(
+                  child: Image.asset(
+                    widget.asset,
+                    fit: BoxFit.cover,
+                    alignment: Alignment.topCenter,
+                    gaplessPlayback: true,
+                  ),
+                ),
+              ),
+              Positioned.fill(
+                child: widget.child,
+              ),
+            ],
+          ),
+        );
+      },
     );
   }
 }
@@ -832,11 +1065,16 @@ class _PngBottomNavigationBar extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final screenWidth = MediaQuery.sizeOf(context).width;
-    final holderWidth = math.min(314.0, screenWidth - 44);
-    final holderHeight = holderWidth * 76 / 298;
-    const sideInset = 5.0;
-    const gap = 7.0;
-    final iconSize = math.max(44.0, holderHeight - 10);
+
+    const designWidth = 274.0;
+    const designHeight = 70.0;
+
+    final holderWidth = math.min(designWidth, screenWidth - 44);
+    final holderHeight = holderWidth * designHeight / designWidth;
+    final scale = holderWidth / designWidth;
+
+    final sideInset = 8.0 * scale;
+    final itemSize = 59.0 * scale;
 
     return Center(
       child: SizedBox(
@@ -845,13 +1083,18 @@ class _PngBottomNavigationBar extends StatelessWidget {
         child: Stack(
           alignment: Alignment.center,
           children: [
-            Positioned.fill(child: Image.asset(_holder, fit: BoxFit.fill)),
+            Positioned.fill(
+              child: Image.asset(
+                _holder,
+                fit: BoxFit.fill,
+              ),
+            ),
             Padding(
               padding: EdgeInsets.symmetric(horizontal: sideInset),
               child: Row(
-                mainAxisAlignment: MainAxisAlignment.start,
+                mainAxisAlignment: MainAxisAlignment.spaceBetween,
                 children: [
-                  for (var index = 0; index < _activeIcons.length; index++) ...[
+                  for (var index = 0; index < _activeIcons.length; index++)
                     Semantics(
                       button: true,
                       selected: selectedIndex == index,
@@ -862,19 +1105,19 @@ class _PngBottomNavigationBar extends StatelessWidget {
                           key: Key(_keys[index]),
                           behavior: HitTestBehavior.opaque,
                           onTap: () => onSelected(index),
-                          child: Image.asset(
-                            selectedIndex == index
-                                ? _activeIcons[index]
-                                : _inactiveIcons[index],
-                            width: iconSize,
-                            height: iconSize,
-                            fit: BoxFit.contain,
+                          child: SizedBox(
+                            width: itemSize,
+                            height: itemSize,
+                            child: Image.asset(
+                              selectedIndex == index
+                                  ? _activeIcons[index]
+                                  : _inactiveIcons[index],
+                              fit: BoxFit.contain,
+                            ),
                           ),
                         ),
                       ),
                     ),
-                    if (index != _activeIcons.length - 1) SizedBox(width: gap),
-                  ],
                 ],
               ),
             ),
@@ -963,24 +1206,32 @@ class _DashboardPage extends StatelessWidget {
                   alignment: Alignment.center,
                   clipBehavior: Clip.none,
                   children: [
-                    Image.asset(
-                      'assets/images/icon/alert.png',
-                      width: 30,
-                      height: 30,
-                      fit: BoxFit.contain,
-                      color: AppColors.ink,
-                    ),
-                    Positioned(
-                      top: 12,
-                      right: 11,
+                    GestureDetector(
+                      key: const Key('homeAlertButton'),
+                      onTap: () {
+                        onAlertsViewed();
+                        _showAlerts(
+                          context,
+                          alerts: alerts,
+                          onDelete: onDeleteAlert,
+                          onClear: onClearAlerts,
+                        );
+                      },
                       child: Container(
-                        width: 8,
-                        height: 8,
-                        decoration: BoxDecoration(
-                          color: hasUnreadAlert
-                              ? AppColors.coral
-                              : AppColors.coral.withValues(alpha: .9),
+                        width: 48,
+                        height: 48,
+                        decoration: const BoxDecoration(
+                          color: Colors.white,
                           shape: BoxShape.circle,
+                        ),
+                        alignment: Alignment.center,
+                        child: Image.asset(
+                          hasUnreadAlert
+                              ? 'assets/images/icon/alertnew.png'
+                              : 'assets/images/icon/alert.png',
+                          width: 24,
+                          height: 24,
+                          fit: BoxFit.contain,
                         ),
                       ),
                     ),
@@ -1077,8 +1328,8 @@ class _TodayHeroCard extends StatelessWidget {
               ),
             ),
             Positioned(
-              top: 28,
-              right: 22,
+              top: 12,
+              right: 10,
               child: _MiniPill(
                 label: '정상 범위 유지 중',
                 foreground: AppColors.ink,
@@ -1086,8 +1337,8 @@ class _TodayHeroCard extends StatelessWidget {
               ),
             ),
             Positioned(
-              left: 18,
-              bottom: 22,
+              left: 12,
+              bottom: 12,
               child: Container(
                 padding: const EdgeInsets.symmetric(
                   horizontal: 12,
@@ -1165,8 +1416,8 @@ class _TodayHeroCard extends StatelessWidget {
                     fetusStyle == 1
                         ? 'assets/images/icon/painting.png'
                         : 'assets/images/icon/picture.png',
-                    width: 24,
-                    height: 24,
+                    width: 12,
+                    height: 12,
                   ),
                 ),
               ),
@@ -1256,385 +1507,38 @@ class _MovementFlowCard extends StatelessWidget {
 
 class _MonitoringPage extends StatefulWidget {
   const _MonitoringPage({
-    required this.userId,
-    required this.fetusName,
-    required this.visible,
+    required this.sensorState,
+    required this.recordingMovement,
     required this.onOpenReport,
-    required this.onDeviceStateChanged,
-    required this.onSensorStatusChanged,
-    required this.onMovementRecorded,
+    required this.onManualRecord,
   });
-  final String userId;
-  final String fetusName;
-  final bool visible;
+
+  final EspSensorState sensorState;
+  final bool recordingMovement;
   final VoidCallback onOpenReport;
-  final ValueChanged<bool> onDeviceStateChanged;
-  final ValueChanged<String> onSensorStatusChanged;
-  final ValueChanged<_MovementAlertEntry> onMovementRecorded;
-
-  static String _prefKey(String userId, String name) =>
-      'monitoring.$userId.$name';
-
-  static Future<bool> isDeviceOnForUser(String userId) async {
-    final prefs = await SharedPreferences.getInstance();
-    return prefs.getBool(_prefKey(userId, 'deviceOn')) ?? false;
-  }
-
-  static Future<void> stopDeviceForUser(String userId) async {
-    final prefs = await SharedPreferences.getInstance();
-    final movementRepository = MovementRepository();
-    final onKey = _prefKey(userId, 'deviceOn');
-    final startKey = _prefKey(userId, 'startedAt');
-    final elapsedKey = _prefKey(userId, 'pausedElapsed');
-    final dateKey = _prefKey(userId, 'activeDate');
-    final now = DateTime.now();
-    final startedAtMillis = prefs.getInt(startKey);
-    final startedAt = startedAtMillis == null
-        ? null
-        : DateTime.fromMillisecondsSinceEpoch(startedAtMillis);
-    if (startedAt != null) {
-      await movementRepository.addDeviceSession(
-        userId: userId,
-        startedAt: startedAt,
-        endedAt: now,
-      );
-    }
-    await prefs.setBool(onKey, false);
-    await prefs.setInt(elapsedKey, 0);
-    await prefs.setInt(dateKey, now.millisecondsSinceEpoch);
-    await prefs.remove(startKey);
-  }
+  final ValueChanged<int> onManualRecord;
 
   @override
   State<_MonitoringPage> createState() => _MonitoringPageState();
 }
 
-class _MonitoringPageState extends State<_MonitoringPage>
-    with SingleTickerProviderStateMixin {
-  final MovementRepository _movementRepository = MovementRepository();
-  final BeltMovementDetector _movementDetector = BeltMovementDetector();
-  final HttpClient _httpClient = HttpClient()
-    ..connectionTimeout = const Duration(seconds: 2);
-  Timer? _timer;
-  Timer? _httpPollTimer;
-  WebSocket? _sensorSocket;
-  StreamSubscription<dynamic>? _sensorSubscription;
-  Duration _elapsed = Duration.zero;
-  Duration _pausedElapsed = Duration.zero;
-  bool _deviceOn = true;
-  bool _recordingMovement = false;
+class _MonitoringPageState extends State<_MonitoringPage> {
   bool _showManualRecordChoices = false;
-  bool _sensorConnecting = false;
-  bool _userMoving = false;
-  bool _movementActive = false;
-  String _sensorStatus = '복부 센서 자동 수신 준비 중';
-  String _selectedAlertSound = _alertSoundAssets.first;
-  List<String> _alertMessages = const [];
-  String? _recordMessage;
-  String? _lastAlertMessage;
-  DateTime? _startedAt;
-  DateTime _activeDate = DateTime.now();
-  DateTime _lastSensorUiUpdate = DateTime.fromMillisecondsSinceEpoch(0);
-  int _lastSensorPeak = -1;
-
-  String get _onKey => _MonitoringPage._prefKey(widget.userId, 'deviceOn');
-  String get _startKey => _MonitoringPage._prefKey(widget.userId, 'startedAt');
-  String get _elapsedKey =>
-      _MonitoringPage._prefKey(widget.userId, 'pausedElapsed');
-  String get _dateKey => _MonitoringPage._prefKey(widget.userId, 'activeDate');
-
-  void _setSensorStatus(String status) {
-    if (_sensorStatus == status) return;
-    if (mounted) setState(() => _sensorStatus = status);
-    widget.onSensorStatusChanged(status);
-  }
-
-  @override
-  void initState() {
-    super.initState();
-    _restore();
-    _restoreAlertSettings();
-    _timer = Timer.periodic(const Duration(seconds: 1), (_) => _tick());
-  }
 
   @override
   void didUpdateWidget(covariant _MonitoringPage oldWidget) {
     super.didUpdateWidget(oldWidget);
-    if (widget.visible == oldWidget.visible) return;
-    if (widget.visible) {
-      unawaited(_startSensorReception());
-    } else {
-      _stopSensorReception();
-      _setSensorStatus('모니터링 화면에서 수신 준비 중');
-    }
-  }
-
-  @override
-  void dispose() {
-    _timer?.cancel();
-    _stopSensorReception();
-    _httpClient.close(force: true);
-    super.dispose();
-  }
-
-  Future<void> _restoreAlertSettings() async {
-    final sound = await _loadAlertSoundAsset(widget.userId);
-    final messages = await _loadMovementAlertMessages();
-    if (!mounted) return;
-    setState(() {
-      _selectedAlertSound = sound;
-      _alertMessages = messages;
-    });
-  }
-
-  Future<void> _restore() async {
-    final prefs = await SharedPreferences.getInstance();
-    final now = DateTime.now();
-    final savedDate = DateTime.fromMillisecondsSinceEpoch(
-      prefs.getInt(_dateKey) ?? now.millisecondsSinceEpoch,
-    );
-    _deviceOn = prefs.getBool(_onKey) ?? false;
-    _activeDate = _isSameDay(savedDate, now) ? savedDate : now;
-    _pausedElapsed = _isSameDay(savedDate, now)
-        ? Duration(seconds: prefs.getInt(_elapsedKey) ?? 0)
-        : Duration.zero;
-    final millis = prefs.getInt(_startKey);
-    _startedAt = millis == null
-        ? (_deviceOn ? now : null)
-        : DateTime.fromMillisecondsSinceEpoch(millis);
-    if (_startedAt != null && !_isSameDay(_startedAt!, now)) {
-      _startedAt = _deviceOn ? now : null;
-      _pausedElapsed = Duration.zero;
-    }
-    if (mounted) {
-      setState(() {
-        _elapsed = _deviceOn && _startedAt != null
-            ? _pausedElapsed + now.difference(_startedAt!)
-            : _pausedElapsed;
-      });
-      widget.onDeviceStateChanged(_deviceOn);
-    }
-    if (millis == null && _deviceOn) _save();
-    if (widget.visible) {
-      unawaited(_startSensorReception());
-    } else {
-      _setSensorStatus('모니터링 화면에서 수신 준비 중');
-    }
-  }
-
-  void _tick() {
-    final now = DateTime.now();
-    if (!_isSameDay(now, _activeDate)) {
-      _activeDate = now;
-      _pausedElapsed = Duration.zero;
-      _startedAt = _deviceOn ? now : null;
-      _elapsed = Duration.zero;
-      _save();
-    }
-    if (_deviceOn && mounted && widget.visible) {
-      setState(
-        () => _elapsed = _pausedElapsed + now.difference(_startedAt ?? now),
-      );
-    }
-  }
-
-  Future<void> _save() async {
-    final prefs = await SharedPreferences.getInstance();
-    await prefs.setBool(_onKey, _deviceOn);
-    await prefs.setInt(_elapsedKey, _pausedElapsed.inSeconds);
-    await prefs.setInt(_dateKey, _activeDate.millisecondsSinceEpoch);
-    if (_deviceOn && _startedAt != null) {
-      await prefs.setInt(_startKey, _startedAt!.millisecondsSinceEpoch);
-    } else {
-      await prefs.remove(_startKey);
-    }
-  }
-
-  Future<void> _startSensorReception() async {
-    if (!widget.visible) return;
-    if (_sensorConnecting || _sensorSubscription != null) return;
-    _sensorConnecting = true;
-    _setSensorStatus('WS 연결 시도');
-    try {
-      final socket = await WebSocket.connect(
-        'ws://192.168.4.1:81/',
-        compression: CompressionOptions.compressionOff,
-      ).timeout(const Duration(seconds: 8));
-      _sensorSocket = socket;
-      _httpPollTimer?.cancel();
-      _httpPollTimer = null;
-      _sensorSubscription = socket.listen(
-        _handleSensorMessage,
-        onError: (_) => _switchToHttpFallback(),
-        onDone: () => _switchToHttpFallback(),
-        cancelOnError: true,
-      );
-      _sensorConnecting = false;
-      await _setDeviceConnected(true);
-      _setSensorStatus('WS 수신 중');
-      return;
-    } catch (_) {
-      await _sensorSocket?.close();
-      _sensorSocket = null;
-    }
-    _sensorConnecting = false;
-    if (!widget.visible) return;
-    _switchToHttpFallback();
-  }
-
-  void _switchToHttpFallback() {
-    _sensorSubscription?.cancel();
-    _sensorSubscription = null;
-    _sensorSocket?.close();
-    _sensorSocket = null;
-    if (!mounted || !widget.visible || _httpPollTimer != null) return;
-    _setSensorStatus('HTTP fallback 수신 중');
-    const url = 'http://192.168.4.1/data';
-    _httpPollTimer = Timer.periodic(const Duration(milliseconds: 500), (_) {
-      unawaited(_pollSensorHttp(url));
-    });
-  }
-
-  Future<void> _pollSensorHttp(String url) async {
-    try {
-      final request = await _httpClient.getUrl(Uri.parse(url));
-      final response = await request.close().timeout(
-        const Duration(seconds: 2),
-      );
-      final body = await response.transform(utf8.decoder).join();
-      _handleSensorMessage(body);
-    } catch (_) {}
-  }
-
-  Future<void> _setDeviceConnected(bool value) async {
-    if (_deviceOn == value && _startedAt != null) return;
-    final now = DateTime.now();
-    setState(() {
-      _deviceOn = value;
-      _startedAt = value ? now : null;
-      _elapsed = value ? _pausedElapsed : Duration.zero;
-    });
-    widget.onDeviceStateChanged(value);
-    await _save();
-  }
-
-  void _stopSensorReception() {
-    _sensorConnecting = false;
-    _sensorSubscription?.cancel();
-    _sensorSubscription = null;
-    _sensorSocket?.close();
-    _sensorSocket = null;
-    _httpPollTimer?.cancel();
-    _httpPollTimer = null;
-  }
-
-  void _handleSensorMessage(dynamic message) {
-    final sample = parseBeltSensorSample(message);
-    if (sample == null) {
-      _setSensorStatus('파싱 실패');
-      return;
-    }
-    final now = DateTime.now();
-    final event = _movementDetector.addSample(sample, now);
-    final status = sample.isUserMoving
-        ? '센서가 흔들리는 중'
-        : '센서 수신 중: peak ${sample.peak}';
-    final stateChanged =
-        _userMoving != sample.isUserMoving ||
-        _movementActive != sample.isMovementActive;
-    final peakChangedEnough = (_lastSensorPeak - sample.peak).abs() >= 80;
-    final canUpdateUi =
-        now.difference(_lastSensorUiUpdate) >=
-        const Duration(milliseconds: 50);
-
-    if (mounted && (stateChanged || (canUpdateUi && peakChangedEnough))) {
-      _lastSensorUiUpdate = now;
-      _lastSensorPeak = sample.peak;
-      setState(() {
-        _userMoving = sample.isUserMoving;
-        _movementActive = sample.isMovementActive;
-        _sensorStatus = status;
-      });
-      widget.onSensorStatusChanged(status);
-    }
-    if (event != null) {
-      unawaited(_recordSensorMovement(event));
-    }
-  }
-
-  Future<void> _recordSensorMovement(BeltMovementEvent event) async {
-    await _movementRepository.addRecord(
-      userId: widget.userId,
-      measuredAt: event.measuredAt,
-      intensity: event.intensity,
-      measuredDuringUserMotion: event.measuredDuringUserMotion,
-    );
-    await _playAlertSound(_selectedAlertSound);
-    if (!mounted) return;
-    final message = _pickMovementAlertMessage(
-      _alertMessages,
-      event.intensity,
-      fetusName: widget.fetusName,
-      previousMessage: _lastAlertMessage,
-    );
-    setState(() {
-      _movementActive = true;
-      _lastAlertMessage = message;
-      _recordMessage = event.measuredDuringUserMotion
-          ? '$message 사용자 움직임이 섞였을 수 있어요.'
-          : message;
-      _sensorStatus = '태동 감지됨';
-    });
-    widget.onSensorStatusChanged('태동 감지됨');
-    widget.onMovementRecorded(
-      _MovementAlertEntry(
-        createdAt: event.measuredAt,
-        intensity: event.intensity,
-        message: _recordMessage ?? message,
-      ),
-    );
-  }
-
-  Future<void> _recordMovement(int intensity, String label) async {
-    if (_recordingMovement) return;
-    setState(() {
-      _recordingMovement = true;
-      _recordMessage = null;
-    });
-    final now = DateTime.now();
-    try {
-      await _movementRepository.addRecord(
-        userId: widget.userId,
-        measuredAt: now,
-        intensity: intensity,
-      );
-      await _playAlertSound(_selectedAlertSound);
-      if (!mounted) return;
-      final message = _pickMovementAlertMessage(
-        _alertMessages,
-        intensity,
-        fetusName: widget.fetusName,
-        previousMessage: _lastAlertMessage,
-      );
-      setState(() {
-        _lastAlertMessage = message;
-        _recordMessage = message;
-        _showManualRecordChoices = false;
-      });
-      widget.onMovementRecorded(
-        _MovementAlertEntry(
-          createdAt: now,
-          intensity: intensity,
-          message: message,
-        ),
-      );
-    } finally {
-      if (mounted) setState(() => _recordingMovement = false);
+    if (oldWidget.recordingMovement && !widget.recordingMovement) {
+      setState(() => _showManualRecordChoices = false);
     }
   }
 
   @override
   Widget build(BuildContext context) {
+    final sensorState = widget.sensorState;
+    final sensorPercent = ((sensorState.peak.clamp(0, 4095) / 4095) * 100)
+        .round();
+        
     return ListView(
       padding: const EdgeInsets.fromLTRB(24, 48, 24, 130),
       children: [
@@ -1648,9 +1552,11 @@ class _MonitoringPageState extends State<_MonitoringPage>
                   text: '디바이스 연결 상태  ',
                   children: [
                     TextSpan(
-                      text: _deviceOn ? '자동 수신 중' : '수신 대기',
+                      text: sensorState.connected ? '기기 수신 중' : '수신 대기',
                       style: TextStyle(
-                        color: _deviceOn ? AppColors.mint : AppColors.coralDark,
+                        color: sensorState.connected
+                            ? AppColors.mint
+                            : AppColors.coralDark,
                         fontWeight: FontWeight.w800,
                       ),
                     ),
@@ -1666,27 +1572,32 @@ class _MonitoringPageState extends State<_MonitoringPage>
           width: 280,
           height: 318,
           child: WaveMonitorWidget(
-            connected: _sensorSocket != null,
-            userMoving: _userMoving,
-            movementActive: _movementActive,
+            connected: sensorState.connected,
+            userMoving: sensorState.userMoving,
+            movementActive: sensorState.movementActive,
           ),
         ),
         const SizedBox(height: 20),
         Row(
           children: [
-            const Expanded(
-              child: _StatusTile(title: '태동', value: '감지 중'),
+            Expanded(
+              child: _StatusTile(
+                title: '태동',
+                value: sensorState.movementActive ? '감지됨' : '감지 중',
+              ),
             ),
             const SizedBox(width: 8),
             Expanded(
               child: _StatusTile(
                 title: '자세',
-                value: _userMoving ? '흔들림' : '안정 상태',
+                value: sensorState.userMoving ? '흔들림' : '안정 상태',
               ),
             ),
-            SizedBox(width: 8),
+            const SizedBox(width: 8),
             Expanded(
-              child: _StatusTile(title: '압박', value: '없음'),
+              child: _StatusTile(
+                title: '센서값', 
+                value: '$sensorPercent%'),
             ),
           ],
         ),
@@ -1707,7 +1618,7 @@ class _MonitoringPageState extends State<_MonitoringPage>
               ),
               const SizedBox(height: 4),
               Text(
-                _formatDuration(_elapsed),
+                _formatDuration(sensorState.elapsed),
                 style: Theme.of(
                   context,
                 ).textTheme.headlineSmall?.copyWith(color: Colors.white),
@@ -1718,13 +1629,12 @@ class _MonitoringPageState extends State<_MonitoringPage>
         const SizedBox(height: 12),
         ElevatedButton.icon(
           key: const Key('openManualMovementPickerButton'),
-          onPressed: _recordingMovement
+          onPressed: widget.recordingMovement
               ? null
               : () => setState(
-                    () => _showManualRecordChoices =
-                        !_showManualRecordChoices,
+                    () => _showManualRecordChoices = !_showManualRecordChoices,
                   ),
-          icon: _recordingMovement
+          icon: widget.recordingMovement
               ? const _ButtonLoader()
               : const Icon(Icons.touch_app_outlined),
           label: const Text('태동 기록 저장'),
@@ -1735,27 +1645,27 @@ class _MonitoringPageState extends State<_MonitoringPage>
             children: [
               Expanded(
                 child: OutlinedButton(
-                  onPressed: _recordingMovement
+                  onPressed: widget.recordingMovement
                       ? null
-                      : () => unawaited(_recordMovement(2000, '약함')),
+                      : () => widget.onManualRecord(2000),
                   child: const Text('약함'),
                 ),
               ),
               const SizedBox(width: 8),
               Expanded(
                 child: OutlinedButton(
-                  onPressed: _recordingMovement
+                  onPressed: widget.recordingMovement
                       ? null
-                      : () => unawaited(_recordMovement(3000, '중간')),
+                      : () => widget.onManualRecord(3000),
                   child: const Text('중간'),
                 ),
               ),
               const SizedBox(width: 8),
               Expanded(
                 child: OutlinedButton(
-                  onPressed: _recordingMovement
+                  onPressed: widget.recordingMovement
                       ? null
-                      : () => unawaited(_recordMovement(3600, '강함')),
+                      : () => widget.onManualRecord(3600),
                   child: const Text('강함'),
                 ),
               ),
@@ -1899,10 +1809,10 @@ class _ReportPageState extends State<ReportPage> {
     DateTime? activeStart;
     final prefs = await SharedPreferences.getInstance();
     final on =
-        prefs.getBool(_MonitoringPage._prefKey(widget.userId, 'deviceOn')) ??
+        prefs.getBool(EspSensorService.prefKey(widget.userId, 'deviceOn')) ??
         false;
     final startedAtMillis = prefs.getInt(
-      _MonitoringPage._prefKey(widget.userId, 'startedAt'),
+      EspSensorService.prefKey(widget.userId, 'startedAt'),
     );
     if (on && startedAtMillis != null) {
       final startedAt = DateTime.fromMillisecondsSinceEpoch(startedAtMillis);
@@ -1967,7 +1877,7 @@ class _ReportPageState extends State<ReportPage> {
       intensityTotals[index] += record.intensity;
     }
     const labels = ['월', '화', '수', '목', '금', '토', '일'];
-    const countMax = 35.0;
+    final countMax = math.max(200, counts.fold<int>(0, math.max)).toDouble();
     return _ReportPair(
       count: _ReportData(
         title: '태동 횟수',
@@ -2022,7 +1932,7 @@ class _ReportPageState extends State<ReportPage> {
       counts[index]++;
       intensityTotals[index] += record.intensity;
     }
-    final countMax = math.max(35, counts.fold<int>(0, math.max)).toDouble();
+    final countMax = math.max(200, counts.fold<int>(0, math.max)).toDouble();
     final countValues = [
       for (var i = 0; i < days.length; i++)
         _isFutureDate(
@@ -2662,14 +2572,25 @@ class _MyPageState extends State<MyPage> {
               ErrorNotice(message: _passwordMessage!),
             ],
             const SizedBox(height: 18),
-            OutlinedButton.icon(
-              key: const Key('changePasswordButton'),
+            ElevatedButton.icon(
+              key: const Key('savePasswordButton'),
               onPressed: _passwordSaving ? null : _savePassword,
+              style: ElevatedButton.styleFrom(
+                backgroundColor: AppColors.ink,
+                foregroundColor: Colors.white,
+                disabledBackgroundColor: AppColors.ink.withValues(alpha: .35),
+                disabledForegroundColor: Colors.white70,
+                elevation: 3,
+                minimumSize: const Size.fromHeight(54),
+                shape: RoundedRectangleBorder(
+                  borderRadius: BorderRadius.circular(22),
+                ),
+              ),
               icon: _passwordSaving
                   ? const _ButtonLoader()
-                  : const Icon(Icons.security_outlined),
+                  : const Icon(Icons.lock_reset_outlined),
               label: const Text('비밀번호 변경'),
-            ),
+            )
           ],
         ),
       ),
@@ -2700,14 +2621,25 @@ class _MyPageState extends State<MyPage> {
             ErrorNotice(message: _deleteMessage!),
           ],
           const SizedBox(height: 18),
-          OutlinedButton.icon(
+          ElevatedButton.icon(
             key: const Key('deleteAccountButton'),
             onPressed: _deleting ? null : _deleteAccount,
+            style: ElevatedButton.styleFrom(
+              backgroundColor: AppColors.ink,
+              foregroundColor: Colors.white,
+              disabledBackgroundColor: AppColors.ink.withValues(alpha: .35),
+              disabledForegroundColor: Colors.white70,
+              elevation: 3,
+              minimumSize: const Size.fromHeight(54),
+              shape: RoundedRectangleBorder(
+                borderRadius: BorderRadius.circular(22),
+              ),
+            ),
             icon: _deleting
                 ? const _ButtonLoader()
                 : const Icon(Icons.delete_outline),
             label: const Text('계정 삭제'),
-          ),
+          )
         ],
       ),
     ),
@@ -2816,9 +2748,23 @@ class _MyPageState extends State<MyPage> {
             ],
           ),
           const SizedBox(height: 14),
-          OutlinedButton.icon(
+          ElevatedButton.icon(
             key: const Key('openAlertSoundPickerButton'),
             onPressed: () => _showAlertSoundPicker(context),
+            style: ElevatedButton.styleFrom(
+              backgroundColor: AppColors.ink,
+              foregroundColor: Colors.white,
+              elevation: 3,
+              shadowColor: Colors.black.withValues(alpha: .18),
+              minimumSize: const Size.fromHeight(54),
+              shape: RoundedRectangleBorder(
+                borderRadius: BorderRadius.circular(22),
+              ),
+              textStyle: const TextStyle(
+                fontWeight: FontWeight.w800,
+                fontSize: 16,
+              ),
+            ),
             icon: const Icon(Icons.music_note_outlined),
             label: const Text('알림음 선택'),
           ),
@@ -2913,7 +2859,7 @@ class _AlertSoundSheetRow extends StatelessWidget {
             onPressed: onPreview,
             icon: const Icon(Icons.play_arrow_rounded),
             label: const Text('소리재생'),
-            style: TextButton.styleFrom(foregroundColor: AppColors.coralDark),
+            style: TextButton.styleFrom(foregroundColor: const ui.Color.fromARGB(255, 255, 255, 255)),
           ),
         ],
       ),
@@ -3140,25 +3086,39 @@ class _ReportChartCardState extends State<_ReportChartCard> {
             widget.data.mode != _ChartMode.dailyBars)) {
       return;
     }
+
     final contentWidth = constraints.maxWidth * _axisScale;
     final tappedX = details.localPosition.dx + _scrollController.offset;
     final tappedHour = (tappedX / contentWidth * 24).clamp(0.0, 24.0);
-    final sorted = [...widget.data.moments]
-      ..sort(
-        (a, b) => (a.hour - tappedHour).abs().compareTo(
-          (b.hour - tappedHour).abs(),
-        ),
-      );
-    final target = sorted.first.measuredAt;
-    if (target == null) return;
-    final bucket = widget.data.moments.where((moment) {
+
+    final bucketMinutes = _aggregationMinutes(_axisScale);
+    final tappedMinute = (tappedHour * 60).round();
+    final tappedBucket = (tappedMinute / bucketMinutes).floor() * bucketMinutes;
+
+    final grouped = <int, List<_ReportMoment>>{};
+
+    for (final moment in widget.data.moments) {
       final measuredAt = moment.measuredAt;
-      return measuredAt != null &&
-          measuredAt.hour == target.hour &&
-          measuredAt.minute == target.minute;
-    }).toList()
+      if (measuredAt == null) continue;
+
+      final minute = (moment.hour * 60).round();
+      final bucket = (minute / bucketMinutes).floor() * bucketMinutes;
+
+      grouped.putIfAbsent(bucket, () => []).add(moment);
+    }
+
+    if (grouped.isEmpty) return;
+
+    final nearestBucket = grouped.keys.reduce((a, b) {
+      final aDiff = (a - tappedBucket).abs();
+      final bDiff = (b - tappedBucket).abs();
+      return aDiff <= bDiff ? a : b;
+    });
+
+    final bucketMoments = [...grouped[nearestBucket]!]
       ..sort((a, b) => a.measuredAt!.compareTo(b.measuredAt!));
-    setState(() => _selectedMoments = bucket);
+
+    setState(() => _selectedMoments = bucketMoments);
   }
 
   @override
@@ -3288,7 +3248,7 @@ class _DeviceTimelineData {
   final DateTime? activeStart;
 }
 
-class _DailyDetailCard extends StatelessWidget {
+class _DailyDetailCard extends StatefulWidget {
   const _DailyDetailCard({
     required this.title,
     required this.moments,
@@ -3300,12 +3260,40 @@ class _DailyDetailCard extends StatelessWidget {
   final VoidCallback onClose;
 
   @override
+  State<_DailyDetailCard> createState() => _DailyDetailCardState();
+}
+
+class _DailyDetailCardState extends State<_DailyDetailCard> {
+  static const int _itemsPerPage = 6;
+  int _pageIndex = 0;
+
+  @override
+  void didUpdateWidget(covariant _DailyDetailCard oldWidget) {
+    super.didUpdateWidget(oldWidget);
+
+    if (oldWidget.moments != widget.moments ||
+        oldWidget.title != widget.title) {
+      _pageIndex = 0;
+    }
+  }
+
+  @override
   Widget build(BuildContext context) {
-    final first = moments.first.measuredAt;
+    final moments = widget.moments;
+    final first = moments.isEmpty ? null : moments.first.measuredAt;
+
     final minuteLabel = first == null
         ? ''
         : '${first.hour.toString().padLeft(2, '0')}:${first.minute.toString().padLeft(2, '0')}';
-    final isCount = title.contains('횟수');
+
+    final isCount = widget.title.contains('횟수');
+
+    final pageCount = math.max(1, (moments.length / _itemsPerPage).ceil());
+    final safePageIndex = _pageIndex.clamp(0, pageCount - 1);
+    final startIndex = safePageIndex * _itemsPerPage;
+    final endIndex = math.min(startIndex + _itemsPerPage, moments.length);
+    final visibleMoments = moments.sublist(startIndex, endIndex);
+
     return Container(
       padding: const EdgeInsets.fromLTRB(14, 12, 8, 14),
       decoration: BoxDecoration(
@@ -3325,34 +3313,87 @@ class _DailyDetailCard extends StatelessWidget {
         children: [
           Row(
             children: [
+              const SizedBox(width: 38),
               Expanded(
-                child: Text(
-                  minuteLabel,
-                  textAlign: TextAlign.center,
-                  style: Theme.of(context).textTheme.titleSmall,
+                child: Column(
+                  children: [
+                    Text(
+                      minuteLabel,
+                      textAlign: TextAlign.center,
+                      style: Theme.of(context).textTheme.titleSmall,
+                    ),
+                    if (moments.length > _itemsPerPage)
+                      Text(
+                        '총 ${moments.length}개 중 ${startIndex + 1}-$endIndex',
+                        textAlign: TextAlign.center,
+                        style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                          fontSize: 11,
+                          fontWeight: FontWeight.w600,
+                        ),
+                      ),
+                  ],
                 ),
               ),
               IconButton(
                 tooltip: '닫기',
-                onPressed: onClose,
+                onPressed: widget.onClose,
                 icon: const Icon(Icons.close_rounded, size: 18),
                 visualDensity: VisualDensity.compact,
               ),
             ],
           ),
           const SizedBox(height: 4),
-          for (final moment in moments)
+
+          for (final moment in visibleMoments)
             Padding(
               padding: const EdgeInsets.symmetric(vertical: 3),
               child: Text(
                 isCount
                     ? '${_formatClock(moment.measuredAt)} 태동: 1회${moment.measuredDuringUserMotion ? ' (사용자의 움직임이 센서 값에 섞여있어요)' : ''}'
                     : '${_formatClock(moment.measuredAt)} 세기: ${(_sensorIntensityRatio(moment.intensity ?? 0) * 100).round()}% (${_intensityLabel(moment.intensity ?? 0)})${moment.measuredDuringUserMotion ? ' (사용자의 움직임이 센서 값에 섞여있어요)' : ''}',
-                style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                  fontWeight: FontWeight.w700,
-                ),
+                style: Theme.of(
+                  context,
+                ).textTheme.bodySmall?.copyWith(fontWeight: FontWeight.w700),
               ),
             ),
+
+          if (pageCount > 1) ...[
+            const SizedBox(height: 8),
+            Row(
+              mainAxisAlignment: MainAxisAlignment.center,
+              children: [
+                IconButton(
+                  tooltip: '이전 페이지',
+                  onPressed: safePageIndex <= 0
+                      ? null
+                      : () => setState(() => _pageIndex--),
+                  icon: const Icon(Icons.chevron_left_rounded),
+                  visualDensity: const VisualDensity(
+                    horizontal: -4,
+                    vertical: -4,
+                  ),
+                ),
+                Text(
+                  '${safePageIndex + 1}/$pageCount',
+                  style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                    color: AppColors.ink,
+                    fontWeight: FontWeight.w800,
+                  ),
+                ),
+                IconButton(
+                  tooltip: '다음 페이지',
+                  onPressed: safePageIndex >= pageCount - 1
+                      ? null
+                      : () => setState(() => _pageIndex++),
+                  icon: const Icon(Icons.chevron_right_rounded),
+                  visualDensity: const VisualDensity(
+                    horizontal: -4,
+                    vertical: -4,
+                  ),
+                ),
+              ],
+            ),
+          ],
         ],
       ),
     );
@@ -3828,7 +3869,12 @@ class _FloatingFetusViewerState extends State<_FloatingFetusViewer>
         return LayoutBuilder(
           builder: (context, constraints) {
             final imageSize =
-                math.min(constraints.maxWidth, constraints.maxHeight) * .84;
+                math.min(constraints.maxWidth, constraints.maxHeight) * .88;
+            
+            const realFetusScale = .96;
+            const abstractFetusScale = 1.08;
+            const uploadedFetusScale = .95;
+            
             if (widget.imageBytes == null && widget.style == 1) {
               return Align(
                 alignment: Alignment.centerLeft,
@@ -3839,7 +3885,7 @@ class _FloatingFetusViewerState extends State<_FloatingFetusViewer>
                     offset: floatingOffset,
                     child: Transform.scale(
                       alignment: Alignment.centerLeft,
-                      scale: .83,
+                      scale: realFetusScale,
                       child: Image.asset(
                         _fetusRealObjectAsset,
                         fit: BoxFit.contain,
@@ -3856,9 +3902,15 @@ class _FloatingFetusViewerState extends State<_FloatingFetusViewer>
                 child: Transform.translate(
                   offset: floatingOffset,
                   child: widget.imageBytes != null
-                      ? Image.memory(widget.imageBytes!, fit: BoxFit.contain)
+                      ? Transform.scale(
+                          scale: uploadedFetusScale,
+                          child: Image.memory(
+                            widget.imageBytes!,
+                            fit: BoxFit.contain,
+                          ),
+                        )
                       : Transform.scale(
-                          scale: 1.08,
+                          scale: abstractFetusScale,
                           child: Image.asset(
                             _fetusAbstractObjectAsset,
                             fit: BoxFit.contain,
@@ -4041,20 +4093,16 @@ class _MonitoringWavePainter extends CustomPainter {
 
     final fillPaint = Paint()
       ..style = PaintingStyle.fill
-      ..shader = const LinearGradient(
-        begin: Alignment.topCenter,
-        end: Alignment.bottomCenter,
-        colors: [
-          Color(0x66FFA279),
-          Color(0x22FFA279),
-          Color(0x00FFA279),
+      ..shader = ui.Gradient.linear(
+        Offset(center.dx, baseY - amplitude - 12),
+        Offset(center.dx, center.dy + radius),
+        [
+          const Color(0xFFFFD7C6),
+          const Color(0xCCFFD7C6), // wave 바로 아래 진한 살구색
+          const Color(0x00FFD7C6), // 아래쪽 투명
         ],
-        stops: [
-          0.0,
-          0.55,
-          1.0,
-        ],
-      ).createShader(circleRect);
+        [0.0, 0.5, 1.0],
+      );
 
     canvas.drawPath(fillPath, fillPaint);
 
@@ -4082,37 +4130,22 @@ enum _ChartValueFormat { number, duration }
 
 Path _smoothPathForPoints(List<Offset> points) {
   final path = Path();
+
   if (points.isEmpty) return path;
+
   path.moveTo(points.first.dx, points.first.dy);
+
   if (points.length == 1) return path;
+
   for (var i = 0; i < points.length - 1; i++) {
-    final p0 = i == 0 ? points[i] : points[i - 1];
-    final p1 = points[i];
-    final p2 = points[i + 1];
-    final p3 = i + 2 < points.length ? points[i + 2] : p2;
-    final control1 = Offset(
-      p1.dx + (p2.dx - p0.dx) * .32,
-      (p1.dy + (p2.dy - p0.dy) * .32).clamp(
-        math.min(p1.dy, p2.dy),
-        math.max(p1.dy, p2.dy),
-      ),
-    );
-    final control2 = Offset(
-      p2.dx - (p3.dx - p1.dx) * .32,
-      (p2.dy - (p3.dy - p1.dy) * .32).clamp(
-        math.min(p1.dy, p2.dy),
-        math.max(p1.dy, p2.dy),
-      ),
-    );
-    path.cubicTo(
-      control1.dx,
-      control1.dy,
-      control2.dx,
-      control2.dy,
-      p2.dx,
-      p2.dy,
-    );
+    final current = points[i];
+    final next = points[i + 1];
+
+    final midX = (current.dx + next.dx) / 2;
+
+    path.cubicTo(midX, current.dy, midX, next.dy, next.dx, next.dy);
   }
+
   return path;
 }
 
@@ -4366,7 +4399,9 @@ class _RoundedBarChartPainter extends CustomPainter {
             );
       final isHighlighted =
           i == highlightIndex || (i == 3 && highlightIndex == null);
+     
       final paint = Paint();
+
       if (isMissing) {
         paint.color = AppColors.softGray.withValues(alpha: .52);
       } else if (isHighlighted) {
@@ -4376,9 +4411,16 @@ class _RoundedBarChartPainter extends CustomPainter {
           [AppColors.mint, AppColors.mint.withValues(alpha: .58)],
         );
       } else {
-        paint.color = AppColors.controlGray;
+        paint.shader = ui.Gradient.linear(
+          Offset(0, rect.top),
+          Offset(0, rect.bottom),
+          const [Color(0xFFFFA077), Color(0xFFFFD7C6)],
+          const [0.0, 1.0],
+        );
       }
+
       canvas.drawRRect(rect, paint);
+
       _drawChartValue(
         canvas,
         Offset(x + width / 2, topInset + height - barHeight - 12),
@@ -4474,7 +4516,8 @@ class _DailyBarChartPainter extends CustomPainter {
       height,
       intervalHours: _timeInterval(axisScale),
     );
-    final barWidth = math.max(5.0, size.width / 48);
+    final viewportWidth = size.width / axisScale.clamp(1.0, double.infinity);
+    final barWidth = 7.0;
     final grouped = <int, List<_ReportMoment>>{};
     final bucketMinutes = _aggregationMinutes(axisScale);
     for (final point in points) {
@@ -4506,7 +4549,8 @@ class _DailyBarChartPainter extends CustomPainter {
           ..shader = ui.Gradient.linear(
             Offset(0, rect.top),
             Offset(0, rect.bottom),
-            [AppColors.coral, AppColors.peach],
+            const [Color(0xFFFFA077), Color(0xFFFFD7C6)],
+            const [0.0, 1.0],
           ),
       );
     }
@@ -4520,7 +4564,7 @@ class _DailyBarChartPainter extends CustomPainter {
 
   @override
   bool shouldRepaint(covariant _DailyBarChartPainter oldDelegate) =>
-      oldDelegate.points != points;
+      oldDelegate.points != points || oldDelegate.axisScale != axisScale;
 }
 
 class _DeviceTimelinePainter extends CustomPainter {

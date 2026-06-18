@@ -1,0 +1,44 @@
+- 로컬 웹 열기
+cd c:\cpd\flonggle\test1
+flutter clean
+flutter build web
+cd build\web
+http-server
+
+- 웹 열기
+
+flutter run -d web --web-port 8080
+ngrok http 8080
+-apk 생성
+cd C:\cpd\flonggle\test1
+
+flutter clean
+
+flutter pub get
+
+flutter build apk
+
+- android 실행
+(
+flutter clean
+
+flutter pub get)
+
+flutter run
+
+- restart 에러
+/gradlew --stop
+
+- vscode 닫기전 
+flutter clean
+
+- 하루 끝
+cd c:\cpd\flonggle\test1; flutter clean; cd android; ./gradlew --stop; 
+cd ..
+
+- git 업로드
+echo build/ >> .gitignore
+git rm -r --cached build
+git add -A
+git commit -m "Update project"
+git push origin main
