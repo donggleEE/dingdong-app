@@ -4,6 +4,7 @@ import 'dart:io';
 
 import 'package:shared_preferences/shared_preferences.dart';
 
+import '../models/movement_thresholds.dart';
 import '../repositories/movement_repository.dart';
 import 'belt_message_parser.dart';
 
@@ -80,6 +81,12 @@ class EspSensorService {
 
   static const _webSocketUrl = 'ws://192.168.4.1:81/';
   static const _httpFallbackUrl = 'http://192.168.4.1/data';
+
+  MovementThresholds _movementThresholds = MovementThresholds.defaults;
+
+  void setMovementThresholds(MovementThresholds thresholds) {
+    _movementThresholds = thresholds.normalized();
+  }
 
   static const _watchdogInterval = Duration(seconds: 5);
   static const _reconnectInterval = Duration(seconds: 10);
@@ -279,6 +286,7 @@ class EspSensorService {
 
     final now = DateTime.now();
 
+    final movementActive = sample.isMovementActiveFor(_movementThresholds);
     // WebSocket 데이터가 더 자주 들어와도 앱에서는 100ms마다 1번만 처리
     // 즉, 최대 1초에 10번 처리
     if (now.difference(_lastSampleHandledAt) < sensorSampleInterval) {
@@ -290,7 +298,11 @@ class EspSensorService {
 
     _setConnected(true);
 
-    final event = _movementDetector.addSample(sample, now);
+    final event = _movementDetector.addSample(
+      sample,
+      now,
+      thresholds: _movementThresholds,
+    );
 
     final status = sample.isUserMoving
         ? '센서가 흔들리는 중'
@@ -300,7 +312,7 @@ class EspSensorService {
       _state.copyWith(
         connecting: false,
         userMoving: sample.isUserMoving,
-        movementActive: sample.isMovementActive,
+        movementActive: movementActive,
         status: status,
         peak: sample.peak,
       ),

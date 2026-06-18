@@ -12,6 +12,7 @@ import 'package:shared_preferences/shared_preferences.dart';
 import 'firebase_options.dart';
 import 'models/fetal_movement_record.dart';
 import 'models/app_user.dart';
+import 'models/movement_thresholds.dart';
 import 'repositories/auth_repository.dart';
 import 'repositories/movement_repository.dart';
 import 'services/belt_message_parser.dart';
@@ -97,6 +98,113 @@ double _sensorIntensityRatio(num intensity) =>
         .clamp(0.0, 1.0)
         .toDouble();
 
+
+
+String _movementThresholdPrefKey(String userId) =>
+    'movementThresholds.$userId.current';
+
+String _movementThresholdHistoryPrefKey(String userId) =>
+    'movementThresholds.$userId.history';
+
+Future<MovementThresholds> _loadMovementThresholds(String userId) async {
+  final prefs = await SharedPreferences.getInstance();
+  final raw = prefs.getString(_movementThresholdPrefKey(userId));
+  if (raw == null) return MovementThresholds.defaults;
+
+  try {
+    return MovementThresholds.fromJson(
+      Map<String, dynamic>.from(jsonDecode(raw) as Map),
+    );
+  } catch (_) {
+    return MovementThresholds.defaults;
+  }
+}
+
+Future<List<MovementThresholdChange>> _loadMovementThresholdHistory(
+  String userId,
+) async {
+  final prefs = await SharedPreferences.getInstance();
+  final raw = prefs.getString(_movementThresholdHistoryPrefKey(userId));
+
+  if (raw == null) {
+    return [
+      MovementThresholdChange(
+        changedAt: DateTime.fromMillisecondsSinceEpoch(0),
+        thresholds: MovementThresholds.defaults,
+      ),
+    ];
+  }
+
+  try {
+    final list = jsonDecode(raw) as List;
+    final history =
+        list
+            .map(
+              (item) => MovementThresholdChange.fromJson(
+                Map<String, dynamic>.from(item as Map),
+              ),
+            )
+            .toList()
+          ..sort((a, b) => a.changedAt.compareTo(b.changedAt));
+
+    if (history.isEmpty) {
+      return [
+        MovementThresholdChange(
+          changedAt: DateTime.fromMillisecondsSinceEpoch(0),
+          thresholds: MovementThresholds.defaults,
+        ),
+      ];
+    }
+
+    return history;
+  } catch (_) {
+    return [
+      MovementThresholdChange(
+        changedAt: DateTime.fromMillisecondsSinceEpoch(0),
+        thresholds: MovementThresholds.defaults,
+      ),
+    ];
+  }
+}
+
+Future<void> _saveMovementThresholds(
+  String userId,
+  MovementThresholds thresholds,
+) async {
+  final normalized = thresholds.normalized();
+  final prefs = await SharedPreferences.getInstance();
+
+  await prefs.setString(
+    _movementThresholdPrefKey(userId),
+    jsonEncode(normalized.toJson()),
+  );
+
+  final history = await _loadMovementThresholdHistory(userId);
+  history.add(
+    MovementThresholdChange(changedAt: DateTime.now(), thresholds: normalized),
+  );
+
+  await prefs.setString(
+    _movementThresholdHistoryPrefKey(userId),
+    jsonEncode(history.map((e) => e.toJson()).toList()),
+  );
+}
+
+String _intensityLabelByThresholds(
+  int intensity,
+  MovementThresholds thresholds,
+) {
+  final t = thresholds.normalized();
+
+  if (intensity < t.detectStart) return '미감지';
+  if (intensity < t.mediumStart) return '약한 태동';
+  if (intensity < t.strongStart) return '중간 태동';
+  return '강한 태동';
+}
+
+double _thresholdRatio(int value) {
+  return (value.clamp(0, 4095) / 4095).clamp(0.0, 1.0).toDouble();
+}
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
   try {
@@ -595,11 +703,11 @@ class _HomeScreenState extends State<HomeScreen> {
   String _selectedAlertSound = _alertSoundAssets.first;
   List<String> _alertMessages = const [];
   String? _lastAlertMessage;
+  MovementThresholds _movementThresholds = MovementThresholds.defaults;
   late int _profileStyle = widget.initialProfileStyle;
   late int _profileBackgroundIndex = widget.initialProfileBackgroundIndex;
   Uint8List? _fetusImageBytes;
   late Uint8List? _profileImageBytes = widget.initialProfileImageBytes;
-
   Future<void> _changeProfileStyle(int value) async {
     setState(() {
       _profileStyle = value;
@@ -645,16 +753,21 @@ class _HomeScreenState extends State<HomeScreen> {
     setState(() => _sensorStatus = value);
   }
 
+
   @override
   void initState() {
     super.initState();
+
     _restoreAlertSettings();
+    unawaited(_restoreMovementThresholds());
+
     _espStateSubscription = EspSensorService.instance.stateStream.listen(
       _handleEspState,
     );
     _espMovementSubscription = EspSensorService.instance.movementStream.listen(
       (event) => unawaited(_handleEspMovement(event)),
     );
+
     unawaited(EspSensorService.instance.start(userId: widget.user.id));
     _handleEspState(EspSensorService.instance.currentState);
 
@@ -677,6 +790,28 @@ class _HomeScreenState extends State<HomeScreen> {
       _alertMessages = messages;
     });
   }
+
+  Future<void> _restoreMovementThresholds() async {
+    final thresholds = await _loadMovementThresholds(widget.user.id);
+    if (!mounted) return;
+
+    setState(() => _movementThresholds = thresholds);
+
+    // ESP 실제 감지 기준에도 적용
+    EspSensorService.instance.setMovementThresholds(thresholds);
+  }
+
+  Future<void> _changeMovementThresholds(MovementThresholds thresholds) async {
+    final normalized = thresholds.normalized();
+
+    setState(() => _movementThresholds = normalized);
+
+    await _saveMovementThresholds(widget.user.id, normalized);
+
+    // 이후 태동 감지 기준도 변경
+    EspSensorService.instance.setMovementThresholds(normalized);
+  }
+
 
   void _handleEspState(EspSensorState state) {
     if (!mounted) return;
@@ -855,6 +990,7 @@ class _HomeScreenState extends State<HomeScreen> {
           child: _MonitoringPage(
             sensorState: _espState,
             recordingMovement: _recordingMovement,
+            movementThresholds: _movementThresholds,
             onOpenReport: () => _selectPage(2),
             onManualRecord: (intensity) =>
                 unawaited(_recordManualMovement(intensity)),
@@ -896,6 +1032,13 @@ class _HomeScreenState extends State<HomeScreen> {
                 setState(() => _profileBackgroundIndex = value),
             onChangeProfileImage: (value) =>
                 unawaited(_changeProfileImage(value)),
+            onAlertSoundChanged: (asset) {
+                setState(() => _selectedAlertSound = asset);
+            },
+            movementThresholds: _movementThresholds,
+            onMovementThresholdsChanged: (thresholds) {
+              unawaited(_changeMovementThresholds(thresholds));
+            },
           ),
         ),
       ),
@@ -1416,8 +1559,8 @@ class _TodayHeroCard extends StatelessWidget {
                     fetusStyle == 1
                         ? 'assets/images/icon/painting.png'
                         : 'assets/images/icon/picture.png',
-                    width: 12,
-                    height: 12,
+                    width: 22,
+                    height: 22,
                   ),
                 ),
               ),
@@ -1509,12 +1652,14 @@ class _MonitoringPage extends StatefulWidget {
   const _MonitoringPage({
     required this.sensorState,
     required this.recordingMovement,
+    required this.movementThresholds,
     required this.onOpenReport,
     required this.onManualRecord,
   });
 
   final EspSensorState sensorState;
   final bool recordingMovement;
+  final MovementThresholds movementThresholds;
   final VoidCallback onOpenReport;
   final ValueChanged<int> onManualRecord;
 
@@ -1647,7 +1792,12 @@ class _MonitoringPageState extends State<_MonitoringPage> {
                 child: OutlinedButton(
                   onPressed: widget.recordingMovement
                       ? null
-                      : () => widget.onManualRecord(2000),
+                      : () => widget.onManualRecord(
+                          ((widget.movementThresholds.detectStart +
+                                      widget.movementThresholds.mediumStart) /
+                                  2)
+                              .round(),
+                        ),
                   child: const Text('약함'),
                 ),
               ),
@@ -1656,7 +1806,12 @@ class _MonitoringPageState extends State<_MonitoringPage> {
                 child: OutlinedButton(
                   onPressed: widget.recordingMovement
                       ? null
-                      : () => widget.onManualRecord(3000),
+                      : () => widget.onManualRecord(
+                          ((widget.movementThresholds.mediumStart +
+                                      widget.movementThresholds.strongStart) /
+                                  2)
+                              .round(),
+                        ),
                   child: const Text('중간'),
                 ),
               ),
@@ -1665,7 +1820,12 @@ class _MonitoringPageState extends State<_MonitoringPage> {
                 child: OutlinedButton(
                   onPressed: widget.recordingMovement
                       ? null
-                      : () => widget.onManualRecord(3600),
+                      : () => widget.onManualRecord(
+                          math.min(
+                            widget.movementThresholds.strongStart + 20,
+                            4095,
+                          ),
+                        ),
                   child: const Text('강함'),
                 ),
               ),
@@ -2154,6 +2314,9 @@ class MyPage extends StatefulWidget {
     required this.onChangeProfileStyle,
     required this.onChangeProfileBackground,
     required this.onChangeProfileImage,
+    required this.onAlertSoundChanged,
+    required this.movementThresholds,
+    required this.onMovementThresholdsChanged,
   });
   final AppUser user;
   final String fetusName;
@@ -2169,6 +2332,9 @@ class MyPage extends StatefulWidget {
   final ValueChanged<int> onChangeProfileStyle;
   final ValueChanged<int> onChangeProfileBackground;
   final ValueChanged<Uint8List> onChangeProfileImage;
+  final ValueChanged<String> onAlertSoundChanged;
+  final MovementThresholds movementThresholds;
+  final ValueChanged<MovementThresholds> onMovementThresholdsChanged;
   @override
   State<MyPage> createState() => _MyPageState();
 }
@@ -2191,6 +2357,25 @@ class _MyPageState extends State<MyPage> {
   final _newPassword = TextEditingController();
   final _newPasswordConfirm = TextEditingController();
   final _deletePassword = TextEditingController();
+
+  late final TextEditingController _detectThresholdController =
+      TextEditingController(
+        text: widget.movementThresholds.detectStart.toString(),
+      );
+
+  late final TextEditingController _mediumThresholdController =
+      TextEditingController(
+        text: widget.movementThresholds.mediumStart.toString(),
+      );
+
+  late final TextEditingController _strongThresholdController =
+      TextEditingController(
+        text: widget.movementThresholds.strongStart.toString(),
+      );
+
+  late MovementThresholds _draftThresholds = widget.movementThresholds;
+  String? _thresholdMessage;
+
   int _tabIndex = 0;
   bool _autoSave = true;
   bool _profileSaving = false;
@@ -2216,8 +2401,68 @@ class _MyPageState extends State<MyPage> {
 
   Future<void> _chooseAlertSound(String asset) async {
     setState(() => _selectedAlertSound = asset);
+
+    // HomeScreen의 태동 감지 알림음도 즉시 변경
+    widget.onAlertSoundChanged(asset);
+
+    // 앱을 다시 켜도 유지되도록 저장
     await _saveAlertSoundAsset(widget.user.id, asset);
-    await _playAlertSound(asset);
+  }
+
+  void _syncThresholdControllerTexts() {
+    _detectThresholdController.text = _draftThresholds.detectStart.toString();
+    _mediumThresholdController.text = _draftThresholds.mediumStart.toString();
+    _strongThresholdController.text = _draftThresholds.strongStart.toString();
+  }
+
+  void _updateDraftThresholds({
+    int? detectStart,
+    int? mediumStart,
+    int? strongStart,
+  }) {
+    setState(() {
+      _draftThresholds = MovementThresholds(
+        detectStart: detectStart ?? _draftThresholds.detectStart,
+        mediumStart: mediumStart ?? _draftThresholds.mediumStart,
+        strongStart: strongStart ?? _draftThresholds.strongStart,
+      ).normalized();
+
+      _thresholdMessage = null;
+      _syncThresholdControllerTexts();
+    });
+  }
+
+  void _confirmThresholds() {
+    final detect = int.tryParse(_detectThresholdController.text.trim());
+    final medium = int.tryParse(_mediumThresholdController.text.trim());
+    final strong = int.tryParse(_strongThresholdController.text.trim());
+
+    if (detect == null || medium == null || strong == null) {
+      setState(() => _thresholdMessage = '숫자만 입력해 주세요.');
+      return;
+    }
+
+    final next = MovementThresholds(
+      detectStart: detect,
+      mediumStart: medium,
+      strongStart: strong,
+    );
+
+    if (!next.isValid) {
+      setState(() => _thresholdMessage = '감지 시작 < 중간 시작 < 강한 시작 순서로 입력해 주세요.');
+      return;
+    }
+
+    final normalized = next.normalized();
+
+    setState(() {
+      _draftThresholds = normalized;
+      _thresholdMessage = '임계값이 적용되었습니다.';
+    });
+
+    _syncThresholdControllerTexts();
+
+    widget.onMovementThresholdsChanged(normalized);
   }
 
   @override
@@ -2230,6 +2475,11 @@ class _MyPageState extends State<MyPage> {
     _newPassword.dispose();
     _newPasswordConfirm.dispose();
     _deletePassword.dispose();
+
+    _detectThresholdController.dispose();
+    _mediumThresholdController.dispose();
+    _strongThresholdController.dispose();
+
     super.dispose();
   }
 
@@ -2673,7 +2923,7 @@ class _MyPageState extends State<MyPage> {
                 ),
               ),
               _MiniPill(
-                label: widget.deviceOn ? '복부센서 기기 연결됨' : '수신 대기',
+                label: widget.deviceOn ? '기기 연결됨' : '수신 대기',
                 foreground: widget.deviceOn
                     ? AppColors.mint
                     : AppColors.coralDark,
@@ -2695,10 +2945,75 @@ class _MyPageState extends State<MyPage> {
             'Wi-Fi: GODORI_WEARABLE / password1234',
             style: Theme.of(context).textTheme.bodySmall,
           ),
+          const SizedBox(height: 16),
+          _buildThresholdEditor(context),
         ],
       ),
     ),
   );
+
+  Widget _buildThresholdEditor(BuildContext context) {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        Text('태동 임계값', style: Theme.of(context).textTheme.titleSmall),
+        const SizedBox(height: 6),
+        Text(
+          '조절 후 확인을 눌러야 실제 감지 기준에 적용됩니다.',
+          style: Theme.of(context).textTheme.bodySmall,
+        ),
+        const SizedBox(height: 14),
+        _ThresholdSliderRow(
+          label: '감지 / 약한 태동 시작',
+          value: _draftThresholds.detectStart,
+          controller: _detectThresholdController,
+          onChanged: (value) => _updateDraftThresholds(detectStart: value),
+        ),
+        const SizedBox(height: 10),
+        _ThresholdSliderRow(
+          label: '중간 태동 시작',
+          value: _draftThresholds.mediumStart,
+          controller: _mediumThresholdController,
+          onChanged: (value) => _updateDraftThresholds(mediumStart: value),
+        ),
+        const SizedBox(height: 10),
+        _ThresholdSliderRow(
+          label: '강한 태동 시작',
+          value: _draftThresholds.strongStart,
+          controller: _strongThresholdController,
+          onChanged: (value) => _updateDraftThresholds(strongStart: value),
+        ),
+        const SizedBox(height: 10),
+        Text(
+          '${_draftThresholds.detectStart}~${_draftThresholds.mediumStart - 1}: 약함 / '
+          '${_draftThresholds.mediumStart}~${_draftThresholds.strongStart - 1}: 중간 / '
+          '${_draftThresholds.strongStart} 이상: 강함',
+          style: Theme.of(
+            context,
+          ).textTheme.bodySmall?.copyWith(fontWeight: FontWeight.w700),
+        ),
+        if (_thresholdMessage != null) ...[
+          const SizedBox(height: 8),
+          Text(
+            _thresholdMessage!,
+            style: Theme.of(context).textTheme.bodySmall?.copyWith(
+              color: _thresholdMessage!.contains('적용')
+                  ? AppColors.mint
+                  : AppColors.coralDark,
+              fontWeight: FontWeight.w800,
+            ),
+          ),
+        ],
+        const SizedBox(height: 12),
+        ElevatedButton.icon(
+          onPressed: _confirmThresholds,
+          icon: const Icon(Icons.check_rounded),
+          label: const Text('임계값 적용'),
+        ),
+      ],
+    );
+  }
+
 
   Widget _buildAlertSoundCard(BuildContext context) => Card(
     child: Padding(
@@ -2822,6 +3137,74 @@ class _MyPageState extends State<MyPage> {
   }
 }
 
+class _ThresholdSliderRow extends StatelessWidget {
+  const _ThresholdSliderRow({
+    required this.label,
+    required this.value,
+    required this.controller,
+    required this.onChanged,
+  });
+
+  final String label;
+  final int value;
+  final TextEditingController controller;
+  final ValueChanged<int> onChanged;
+
+  @override
+  Widget build(BuildContext context) {
+    final safeValue = value.clamp(0, 4095);
+    final percent = ((safeValue / 4095) * 100).round();
+
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        Row(
+          children: [
+            Expanded(
+              child: Text(
+                '$label · $percent%',
+                style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                  fontWeight: FontWeight.w800,
+                  color: AppColors.ink,
+                ),
+              ),
+            ),
+            SizedBox(
+              width: 86,
+              child: TextField(
+                controller: controller,
+                keyboardType: TextInputType.number,
+                textAlign: TextAlign.center,
+                decoration: const InputDecoration(
+                  isDense: true,
+                  contentPadding: EdgeInsets.symmetric(
+                    horizontal: 8,
+                    vertical: 8,
+                  ),
+                ),
+                onSubmitted: (_) {
+                  final parsed = int.tryParse(controller.text.trim());
+                  if (parsed == null) return;
+                  onChanged(parsed.clamp(0, 4095));
+                },
+              ),
+            ),
+          ],
+        ),
+        Slider(
+          value: safeValue.toDouble(),
+          min: 0,
+          max: 4095,
+          divisions: 4095,
+          activeColor: AppColors.ink,
+          inactiveColor: AppColors.softGray,
+          onChanged: (next) => onChanged(next.round()),
+        ),
+      ],
+    );
+  }
+}
+
 class _AlertSoundSheetRow extends StatelessWidget {
   const _AlertSoundSheetRow({
     super.key,
@@ -2855,11 +3238,24 @@ class _AlertSoundSheetRow extends StatelessWidget {
               style: Theme.of(context).textTheme.titleSmall,
             ),
           ),
-          TextButton.icon(
+          ElevatedButton.icon(
             onPressed: onPreview,
-            icon: const Icon(Icons.play_arrow_rounded),
+            style: ElevatedButton.styleFrom(
+              backgroundColor: AppColors.ink,
+              foregroundColor: Colors.white,
+              elevation: 0,
+              minimumSize: const Size(96, 40),
+              padding: const EdgeInsets.symmetric(horizontal: 12),
+              shape: RoundedRectangleBorder(
+                borderRadius: BorderRadius.circular(14),
+              ),
+              textStyle: const TextStyle(
+                fontWeight: FontWeight.w800,
+                fontSize: 13,
+              ),
+            ),
+            icon: const Icon(Icons.play_arrow_rounded, size: 18),
             label: const Text('소리재생'),
-            style: TextButton.styleFrom(foregroundColor: const ui.Color.fromARGB(255, 255, 255, 255)),
           ),
         ],
       ),

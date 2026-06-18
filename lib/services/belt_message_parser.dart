@@ -1,5 +1,6 @@
 import 'dart:convert';
 import 'dart:math' as math;
+import '../models/movement_thresholds.dart';
 
 const int beltSensorChannelCount = 16;
 const int beltSensorMaxValue = 4095;
@@ -17,10 +18,27 @@ class BeltSensorSample {
 
   int get peak => values.fold<int>(0, math.max);
   bool get isUserMoving => motion?.isUserMoving ?? false;
+
+  // 기존 코드 호환용 기본 기준
   int get activeFetalMovementThreshold => isUserMoving
       ? fetalMovementThresholdWhileUserMoving
       : fetalMovementThreshold;
-  bool get isMovementActive => peak > activeFetalMovementThreshold;
+
+  bool get isMovementActive => peak >= activeFetalMovementThreshold;
+
+  // 사용자가 설정한 임계값 기준
+  int activeFetalMovementThresholdFor(MovementThresholds thresholds) {
+    final normalized = thresholds.normalized();
+
+    // 사용자가 움직이는 중이면 더 강한 기준을 사용
+    // 기존 fetalMovementThresholdWhileUserMoving = 4090 역할을
+    // 사용자가 설정한 strongStart가 대신 맡음
+    return isUserMoving ? normalized.strongStart : normalized.detectStart;
+  }
+
+  bool isMovementActiveFor(MovementThresholds thresholds) {
+    return peak >= activeFetalMovementThresholdFor(thresholds);
+  }
 }
 
 class BeltMotionSample {
@@ -67,15 +85,25 @@ class BeltMovementEvent {
 class BeltMovementDetector {
   bool _active = false;
 
-  BeltMovementEvent? addSample(BeltSensorSample sample, DateTime sampledAt) {
+  BeltMovementEvent? addSample(
+    BeltSensorSample sample,
+    DateTime measuredAt, {
+    MovementThresholds thresholds = MovementThresholds.defaults,
+  }) {
+    final normalized = thresholds.normalized();
     final peak = sample.peak;
-    final threshold = sample.activeFetalMovementThreshold;
-    if (peak > threshold) {
+
+    final threshold = sample.activeFetalMovementThresholdFor(normalized);
+    final movementActive = peak >= threshold;
+
+    if (movementActive) {
       if (_active) return null;
+
       _active = true;
+
       return BeltMovementEvent(
-        measuredAt: sampledAt,
-        intensity: peak.clamp(threshold + 1, beltSensorMaxValue),
+        measuredAt: measuredAt,
+        intensity: peak.clamp(threshold, beltSensorMaxValue).toInt(),
         measuredDuringUserMotion: sample.isUserMoving,
       );
     }
